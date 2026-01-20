@@ -124,22 +124,26 @@ export default function SubscribePage() {
 
         currency: 'KES',
         ref: data.reference,
-        callback: async (response) => {
-          const verifyResponse = await fetch('/api/subscriptions/verify', {
+        callback: function (response: { reference: string }) {
+          fetch('/api/subscriptions/verify', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reference: response.reference })
           })
-
-          const verifyData = await verifyResponse.json()
-
-          if (verifyData.success) {
-            toast.success('Welcome to the crew! Subscription activated.')
-            window.location.href = '/music-pool'
-          } else {
-            toast.error('Verification failed. Please contact support.')
-          }
-          setProcessing(false)
+            .then(res => res.json())
+            .then(verifyData => {
+              if (verifyData.success) {
+                toast.success('Welcome to the crew! Subscription activated.')
+                window.location.href = '/music-pool'
+              } else {
+                toast.error('Verification failed. Please contact support.')
+              }
+              setProcessing(false)
+            })
+            .catch(() => {
+              toast.error('Verification error')
+              setProcessing(false)
+            })
         },
         onClose: () => {
           setProcessing(false)
