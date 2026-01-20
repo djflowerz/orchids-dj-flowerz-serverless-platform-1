@@ -1,9 +1,44 @@
+"use client"
+
+import { useState, useEffect } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
-import { Headphones, Calendar, Music, ArrowRight, Play, Star, Users, Youtube, Mail, Download, Crown, Send, Shield, Zap, Check } from 'lucide-react'
+import { Headphones, Calendar, Music, ArrowRight, Play, Star, Users, Youtube, Mail, Download, Crown, Send, Shield, Zap, Check, ShoppingBag, TrendingUp, Sparkles, Award } from 'lucide-react'
 import { NewsletterForm } from '@/components/home/NewsletterForm'
+import { db } from '@/lib/firebase'
+import { collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore'
+import { Product } from '@/lib/types'
 
 export default function Home() {
+  const [trendingProducts, setTrendingProducts] = useState<Product[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function fetchProducts() {
+      try {
+        // Fetch trending products (published products, ordered by downloads/popularity)
+        const trendingQuery = query(
+          collection(db, 'products'),
+          where('status', '==', 'published'),
+          orderBy('downloads', 'desc'),
+          limit(4)
+        )
+        const trendingSnap = await getDocs(trendingQuery)
+        const trending = trendingSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product))
+
+        setTrendingProducts(trending)
+      } catch (error) {
+        console.error('Error fetching products:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchProducts()
+  }, [])
+
+  const formatCurrency = (amount: number) => new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(amount)
+
   return (
     <div className="min-h-screen bg-black">
       <section className="relative h-screen flex items-center justify-center overflow-hidden">
@@ -23,13 +58,13 @@ export default function Home() {
             <Star size={16} className="text-amber-400 fill-amber-400" />
             <span>The Official Platform of DJ FLOWERZ</span>
           </div>
-          
+
           <h1 className="font-display text-6xl sm:text-8xl lg:text-9xl text-white font-black tracking-tighter mb-8 leading-none animate-slide-up">
             EXPERIENCE THE <span className="text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-500 to-cyan-500">SOUND.</span>
           </h1>
-          
+
           <p className="text-white/70 text-lg sm:text-2xl max-w-2xl mx-auto mb-12 animate-slide-up delay-100">
-            Free mixtapes, exclusive music pool, and world-class event bookings. 
+            Free mixtapes, exclusive music pool, and world-class event bookings.
             Join the elite circle of DJs and music enthusiasts.
           </p>
 
@@ -77,7 +112,203 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="py-20 px-6 bg-zinc-950">
+      {/* Mixtapes & Music Pool Section - MOVED UP */}
+      <section className="py-24 px-6 bg-black">
+        <div className="max-w-7xl mx-auto">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+            <div className="relative group rounded-3xl overflow-hidden aspect-[16/10] bg-zinc-900 border border-white/5">
+              <Image
+                src="https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=800"
+                alt="Free Mixtapes"
+                fill
+                className="object-cover opacity-50 group-hover:scale-105 transition-transform duration-700"
+              />
+              <div className="absolute inset-0 p-12 flex flex-col justify-end bg-gradient-to-t from-black to-transparent">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-green-500/20 text-green-400 text-xs font-semibold mb-4 w-fit">
+                  <Download size={12} /> FREE DOWNLOADS
+                </div>
+                <h2 className="text-4xl font-bold text-white mb-4">Mixtapes</h2>
+                <p className="text-white/60 mb-8 max-w-sm">From Afrobeats to Amapiano, get the hottest sets curated by DJ FLOWERZ. Always free.</p>
+                <Link href="/mixtapes" className="inline-flex items-center gap-2 text-white font-bold group-hover:text-fuchsia-400 transition-colors">
+                  Browse Collection <ArrowRight size={20} />
+                </Link>
+              </div>
+            </div>
+
+            <div className="relative group rounded-3xl overflow-hidden aspect-[16/10] bg-zinc-900 border border-white/5">
+              <Image
+                src="https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800"
+                alt="Music Pool"
+                fill
+                className="object-cover opacity-50 group-hover:scale-105 transition-transform duration-700"
+              />
+              <div className="absolute inset-0 p-12 flex flex-col justify-end bg-gradient-to-t from-black to-transparent">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-fuchsia-500/20 text-fuchsia-400 text-xs font-semibold mb-4 w-fit">
+                  <Crown size={12} /> SUBSCRIBERS ONLY
+                </div>
+                <h2 className="text-4xl font-bold text-white mb-4">Music Pool</h2>
+                <p className="text-white/60 mb-8 max-w-sm">Exclusive DJ edits, remixes, and tools. New tracks added weekly. From KSh 200/week.</p>
+                <Link href="/music-pool" className="inline-flex items-center gap-2 text-white font-bold group-hover:text-cyan-400 transition-colors">
+                  View Plans <ArrowRight size={20} />
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* DJ Store Showcase Section - MOVED BEFORE "Who is this for" */}
+      <section className="py-24 px-6 bg-zinc-950">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-12">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 text-sm font-medium mb-6">
+              <ShoppingBag size={18} />
+              <span>Computer Store</span>
+            </div>
+            <h2 className="font-display text-4xl sm:text-6xl text-white mb-4">LAPTOPS & TECH</h2>
+            <p className="text-white/60 max-w-2xl mx-auto">
+              Shop our collection of high-performance Laptops, Desktops, Hard Drives, and tech accessories.
+            </p>
+          </div>
+
+          {/* Trending Products */}
+          <div className="mb-10">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
+                  <TrendingUp size={20} className="text-white" />
+                </div>
+                <h3 className="text-2xl font-bold text-white">Trending Now</h3>
+              </div>
+              <Link href="/store?sort=trending" className="text-violet-400 hover:text-violet-300 font-semibold flex items-center gap-2">
+                View All <ArrowRight size={16} />
+              </Link>
+            </div>
+
+            {loading ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                {[1, 2, 3, 4].map(i => (
+                  <div key={i} className="bg-white/5 rounded-2xl border border-white/10 p-4 animate-pulse">
+                    <div className="aspect-square bg-white/10 rounded-xl mb-4" />
+                    <div className="h-4 bg-white/10 rounded mb-2" />
+                    <div className="h-3 bg-white/10 rounded w-2/3" />
+                  </div>
+                ))}
+              </div>
+            ) : trendingProducts.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                {trendingProducts.map((product) => (
+                  <Link key={product.id} href={`/store/${product.id}`} className="group">
+                    <div className="bg-white/5 rounded-2xl border border-white/10 hover:border-violet-500/50 transition-all overflow-hidden">
+                      <div className="relative aspect-square overflow-hidden bg-white/5">
+                        <Image
+                          src={product.cover_images?.[0] || product.image_url || 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=500'}
+                          alt={product.title}
+                          fill
+                          className="object-cover group-hover:scale-110 transition-transform duration-500"
+                        />
+                        <div className="absolute top-3 right-3 px-2 py-1 rounded-full bg-orange-500 text-white text-xs font-bold flex items-center gap-1">
+                          <TrendingUp size={12} /> HOT
+                        </div>
+                      </div>
+                      <div className="p-4">
+                        <h4 className="text-white font-semibold mb-1 line-clamp-1 group-hover:text-violet-400 transition-colors">{product.title}</h4>
+                        <p className="text-white/50 text-sm mb-2">{product.category}</p>
+                        <div className="flex items-center justify-between">
+                          <span className="text-violet-400 font-bold">
+                            {product.is_free ? 'Free' : formatCurrency(product.price)}
+                          </span>
+                          {product.average_rating && product.average_rating > 0 && (
+                            <div className="flex items-center gap-1">
+                              <Star size={14} className="text-yellow-400 fill-yellow-400" />
+                              <span className="text-white/70 text-sm">{product.average_rating.toFixed(1)}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12 text-white/50">No trending products yet</div>
+            )}
+          </div>
+
+          {/* CTA */}
+          <div className="text-center">
+            <Link
+              href="/store"
+              className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white rounded-full font-bold text-lg hover:opacity-90 transition-all"
+            >
+              <ShoppingBag size={20} />
+              Explore Full Store
+              <ArrowRight size={20} />
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* YouTube Section - MOVED UP */}
+      <section className="py-24 px-6 bg-zinc-950">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-12">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-medium mb-6">
+              <Youtube size={18} />
+              <span>@dj_flowerz</span>
+            </div>
+            <h2 className="font-display text-4xl sm:text-6xl text-white mb-4">WATCH THE VIBES</h2>
+            <p className="text-white/60 max-w-2xl mx-auto">
+              Catch live sets, behind-the-scenes content, and exclusive video mixes on the official DJ FLOWERZ YouTube channel.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="relative group rounded-2xl overflow-hidden aspect-video bg-zinc-900 border border-white/5">
+              <iframe
+                src="https://www.youtube.com/embed?listType=user_uploads&list=dj_flowerz"
+                title="DJ FLOWERZ - Latest Uploads"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                className="w-full h-full"
+              />
+            </div>
+            <div className="relative group rounded-2xl overflow-hidden aspect-video bg-zinc-900 border border-white/5">
+              <iframe
+                src="https://www.youtube.com/embed?listType=user_uploads&list=dj_flowerz&index=1"
+                title="DJ FLOWERZ - Featured Mix"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                className="w-full h-full"
+              />
+            </div>
+            <div className="relative group rounded-2xl overflow-hidden aspect-video bg-zinc-900 border border-white/5">
+              <iframe
+                src="https://www.youtube.com/embed?listType=user_uploads&list=dj_flowerz&index=2"
+                title="DJ FLOWERZ - Popular Mix"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                className="w-full h-full"
+              />
+            </div>
+          </div>
+
+          <div className="text-center mt-10">
+            <a
+              href="https://www.youtube.com/@dj_flowerz"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-6 py-3 bg-red-500 text-white rounded-full font-semibold hover:bg-red-600 transition-colors"
+            >
+              <Youtube size={20} />
+              Subscribe to Channel
+            </a>
+          </div>
+        </div>
+      </section>
+
+      {/* Who is this for Section */}
+      <section className="py-20 px-6 bg-black">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-12">
             <h2 className="font-display text-4xl sm:text-5xl text-white mb-4">WHO IS THIS FOR?</h2>
@@ -135,50 +366,22 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="py-24 px-6 bg-black">
-        <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-            <div className="relative group rounded-3xl overflow-hidden aspect-[16/10] bg-zinc-900 border border-white/5">
-              <Image
-                src="https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=800"
-                alt="Free Mixtapes"
-                fill
-                className="object-cover opacity-50 group-hover:scale-105 transition-transform duration-700"
-              />
-              <div className="absolute inset-0 p-12 flex flex-col justify-end bg-gradient-to-t from-black to-transparent">
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-green-500/20 text-green-400 text-xs font-semibold mb-4 w-fit">
-                  <Download size={12} /> FREE DOWNLOADS
-                </div>
-                <h2 className="text-4xl font-bold text-white mb-4">Mixtapes</h2>
-                <p className="text-white/60 mb-8 max-w-sm">From Afrobeats to Amapiano, get the hottest sets curated by DJ FLOWERZ. Always free.</p>
-                <Link href="/mixtapes" className="inline-flex items-center gap-2 text-white font-bold group-hover:text-fuchsia-400 transition-colors">
-                  Browse Collection <ArrowRight size={20} />
-                </Link>
-              </div>
-            </div>
-
-            <div className="relative group rounded-3xl overflow-hidden aspect-[16/10] bg-zinc-900 border border-white/5">
-              <Image
-                src="https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800"
-                alt="Music Pool"
-                fill
-                className="object-cover opacity-50 group-hover:scale-105 transition-transform duration-700"
-              />
-              <div className="absolute inset-0 p-12 flex flex-col justify-end bg-gradient-to-t from-black to-transparent">
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-fuchsia-500/20 text-fuchsia-400 text-xs font-semibold mb-4 w-fit">
-                  <Crown size={12} /> SUBSCRIBERS ONLY
-                </div>
-                <h2 className="text-4xl font-bold text-white mb-4">Music Pool</h2>
-                <p className="text-white/60 mb-8 max-w-sm">Exclusive DJ edits, remixes, and tools. New tracks added weekly. From KSh 200/week.</p>
-                <Link href="/music-pool" className="inline-flex items-center gap-2 text-white font-bold group-hover:text-cyan-400 transition-colors">
-                  View Plans <ArrowRight size={20} />
-                </Link>
-              </div>
-            </div>
+      {/* Newsletter Section */}
+      <section className="py-24 px-6 bg-gradient-to-b from-black to-zinc-950">
+        <div className="max-w-3xl mx-auto text-center">
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-fuchsia-500/10 border border-fuchsia-500/20 text-fuchsia-400 text-sm font-medium mb-6">
+            <Mail size={18} />
+            <span>Newsletter</span>
           </div>
+          <h2 className="font-display text-4xl sm:text-5xl text-white mb-4">STAY IN THE LOOP</h2>
+          <p className="text-white/60 mb-8 max-w-xl mx-auto">
+            Get exclusive updates, new release alerts, and early access to events. Join the DJ FLOWERZ mailing list.
+          </p>
+          <NewsletterForm />
         </div>
       </section>
 
+      {/* Telegram Section */}
       <section className="py-24 px-6 bg-zinc-950">
         <div className="max-w-7xl mx-auto">
           <div className="flex flex-col lg:flex-row items-center gap-12">
@@ -240,64 +443,8 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Testimonials Section */}
       <section className="py-24 px-6 bg-black">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-12">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-medium mb-6">
-              <Youtube size={18} />
-              <span>@dj_flowerz</span>
-            </div>
-            <h2 className="font-display text-4xl sm:text-6xl text-white mb-4">WATCH THE VIBES</h2>
-            <p className="text-white/60 max-w-2xl mx-auto">
-              Catch live sets, behind-the-scenes content, and exclusive video mixes on the official DJ FLOWERZ YouTube channel.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <div className="relative group rounded-2xl overflow-hidden aspect-video bg-zinc-900 border border-white/5">
-              <iframe
-                src="https://www.youtube.com/embed?listType=user_uploads&list=dj_flowerz"
-                title="DJ FLOWERZ - Latest Uploads"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-                className="w-full h-full"
-              />
-            </div>
-            <div className="relative group rounded-2xl overflow-hidden aspect-video bg-zinc-900 border border-white/5">
-              <iframe
-                src="https://www.youtube.com/embed?listType=user_uploads&list=dj_flowerz&index=1"
-                title="DJ FLOWERZ - Featured Mix"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-                className="w-full h-full"
-              />
-            </div>
-            <div className="relative group rounded-2xl overflow-hidden aspect-video bg-zinc-900 border border-white/5">
-              <iframe
-                src="https://www.youtube.com/embed?listType=user_uploads&list=dj_flowerz&index=2"
-                title="DJ FLOWERZ - Popular Mix"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-                className="w-full h-full"
-              />
-            </div>
-          </div>
-
-          <div className="text-center mt-10">
-            <a
-              href="https://www.youtube.com/@dj_flowerz"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-6 py-3 bg-red-500 text-white rounded-full font-semibold hover:bg-red-600 transition-colors"
-            >
-              <Youtube size={20} />
-              Subscribe to Channel
-            </a>
-          </div>
-        </div>
-      </section>
-
-      <section className="py-24 px-6 bg-zinc-950">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-12">
             <h2 className="font-display text-4xl sm:text-5xl text-white mb-4">WHAT DJS ARE SAYING</h2>
@@ -339,20 +486,6 @@ export default function Home() {
               </div>
             ))}
           </div>
-        </div>
-      </section>
-
-      <section className="py-24 px-6 bg-gradient-to-b from-black to-zinc-950">
-        <div className="max-w-3xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-fuchsia-500/10 border border-fuchsia-500/20 text-fuchsia-400 text-sm font-medium mb-6">
-            <Mail size={18} />
-            <span>Newsletter</span>
-          </div>
-          <h2 className="font-display text-4xl sm:text-5xl text-white mb-4">STAY IN THE LOOP</h2>
-          <p className="text-white/60 mb-8 max-w-xl mx-auto">
-            Get exclusive updates, new release alerts, and early access to events. Join the DJ FLOWERZ mailing list.
-          </p>
-          <NewsletterForm />
         </div>
       </section>
     </div>

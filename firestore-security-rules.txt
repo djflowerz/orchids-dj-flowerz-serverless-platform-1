@@ -1,0 +1,124 @@
+// Firestore Security Rules for Digital Product Access Control
+// Add these rules to your firestore.rules file
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    function hasProductAccess(productId) {
+      return isSignedIn() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid))
+               .data.productsAccess
+               .hasAny([productId]);
+    }
+    
+    function hasDownloadsRemaining(productId) {
+      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
+      let access = userDoc.data.productsAccess;
+      return access.filter(p => p.productId == productId && p.downloadsRemaining > 0).size() > 0;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow write: if isAdmin();
+      
+      // Allow users to update their own productsAccess (managed by backend)
+      allow update: if isSignedIn() && request.auth.uid == userId && 
+                       request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['productsAccess', 'updated_at']);
+    }
+
+    // Products collection
+    match /products/{productId} {
+      // Anyone can read published products
+      allow read: if resource.data.status == 'published';
+      
+      // Only admins can write
+      allow write: if isAdmin();
+    }
+
+    // Download tokens - server-side only
+    match /download_tokens/{tokenId} {
+      allow read: if false; // Server-side only
+      allow write: if false; // Server-side only
+    }
+
+    // Download logs - admin read only
+    match /download_logs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false; // Server-side only
+    }
+
+    // User purchases
+    match /user_purchases/{purchaseId} {
+      allow read: if isSignedIn() && 
+                     (resource.data.user_email == request.auth.token.email || isAdmin());
+      allow write: if false; // Server-side only
+    }
+
+    // Transactions - admin only
+    match /transactions/{transactionId} {
+      allow read: if isAdmin();
+      allow write: if false; // Server-side only
+    }
+
+    // Payments - server-side only
+    match /payments/{paymentId} {
+      allow read: if false;
+      allow write: if false;
+    }
+
+    // Subscriptions
+    match /subscriptions/{subscriptionId} {
+      allow read: if isSignedIn() && 
+                     (resource.data.user_id == request.auth.uid || isAdmin());
+      allow write: if false; // Server-side only
+    }
+
+    // Orders
+    match /orders/{orderId} {
+      allow read: if isSignedIn() && 
+                     (resource.data.user_id == request.auth.uid || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // Mixtapes
+    match /mixtapes/{mixtapeId} {
+      allow read: if true; // Public
+      allow write: if isAdmin();
+    }
+
+    // Music Pool - subscription required
+    match /music_pool/{trackId} {
+      allow read: if isSignedIn() && 
+                     (isAdmin() || 
+                      get(/databases/$(database)/documents/users/$(request.auth.uid))
+                        .data.subscription_status == 'active');
+      allow write: if isAdmin();
+    }
+
+    // Bookings
+    match /bookings/{bookingId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // Settings - admin only
+    match /settings/{settingId} {
+      allow read: if true; // Public settings
+      allow write: if isAdmin();
+    }
+  }
+}

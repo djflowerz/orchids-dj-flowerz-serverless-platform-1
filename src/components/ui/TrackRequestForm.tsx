@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext'
-import { supabase } from '@/lib/supabase'
+import { db } from '@/lib/firebase'
+import { collection, query, where, getDocs, orderBy, addDoc, Timestamp } from 'firebase/firestore'
 import { Music, Send, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -34,19 +35,30 @@ export function TrackRequestForm() {
   }, [user])
 
   async function fetchRequests() {
-    const { data } = await supabase
-      .from('track_requests')
-      .select('*')
-      .eq('user_id', user?.id)
-      .order('created_at', { ascending: false })
-    
-    setRequests(data || [])
-    setLoading(false)
+    try {
+      const q = query(
+        collection(db, 'track_requests'),
+        where('user_id', '==', user?.id),
+        orderBy('created_at', 'desc')
+      )
+      const snapshot = await getDocs(q)
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        created_at: doc.data().created_at?.toDate?.().toISOString() || new Date().toISOString()
+      })) as TrackRequest[]
+      setRequests(data)
+    } catch (error) {
+      console.error('Error fetching requests:', error)
+      setRequests([])
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    
+
     if (!user) {
       toast.error('Please sign in to request tracks')
       return
@@ -59,25 +71,25 @@ export function TrackRequestForm() {
 
     setSubmitting(true)
 
-    const { error } = await supabase
-      .from('track_requests')
-      .insert({
+    try {
+      await addDoc(collection(db, 'track_requests'), {
         user_id: user.id,
         user_email: user.email,
         track_title: trackTitle,
         artist: artist,
         notes: notes,
-        status: 'pending'
+        status: 'pending',
+        created_at: Timestamp.now()
       })
 
-    if (error) {
-      toast.error('Failed to submit request')
-    } else {
       toast.success('Track request submitted!')
       setTrackTitle('')
       setArtist('')
       setNotes('')
       fetchRequests()
+    } catch (error) {
+      console.error('Error submitting track request:', error)
+      toast.error('Failed to submit request')
     }
 
     setSubmitting(false)
@@ -173,11 +185,10 @@ export function TrackRequestForm() {
                       {getStatusIcon(request.status)}
                       <span className="text-white font-medium">{request.track_title}</span>
                     </div>
-                    <span className={`text-xs px-2 py-1 rounded-full ${
-                      request.status === 'completed' ? 'bg-green-500/20 text-green-400' :
-                      request.status === 'rejected' ? 'bg-red-500/20 text-red-400' :
-                      'bg-yellow-500/20 text-yellow-400'
-                    }`}>
+                    <span className={`text-xs px-2 py-1 rounded-full ${request.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                        request.status === 'rejected' ? 'bg-red-500/20 text-red-400' :
+                          'bg-yellow-500/20 text-yellow-400'
+                      }`}>
                       {request.status}
                     </span>
                   </div>

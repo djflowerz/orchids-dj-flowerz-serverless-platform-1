@@ -1,13 +1,26 @@
-import { supabase } from '@/lib/supabase'
+import { adminDb } from '@/lib/firebase-admin'
 import { Product } from '@/lib/types'
 import { ProductsList } from '@/components/store/ProductsList'
 
 async function getProducts(): Promise<Product[]> {
-  const { data } = await supabase
-    .from('products')
-    .select('*')
-    .order('created_at', { ascending: false })
-  return data || []
+  try {
+    const snapshot = await adminDb
+      .collection('products')
+      .orderBy('created_at', 'desc')
+      .get()
+
+    return snapshot.docs.map(doc => {
+      const data = doc.data()
+      return {
+        id: doc.id,
+        ...data,
+        created_at: data.created_at?.toDate?.().toISOString() || new Date().toISOString()
+      } as Product
+    })
+  } catch (error) {
+    console.error('Error fetching products:', error)
+    return []
+  }
 }
 
 export const revalidate = 60

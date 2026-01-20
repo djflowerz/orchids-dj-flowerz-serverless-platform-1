@@ -5,6 +5,10 @@ import { Heart, DollarSign } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { toast } from 'sonner'
 import Link from 'next/link'
+import { db } from '@/lib/firebase'
+import { doc, getDoc } from 'firebase/firestore'
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 
 declare global {
   interface Window {
@@ -15,6 +19,7 @@ declare global {
         amount: number
         currency: string
         ref: string
+        metadata?: Record<string, unknown>
         callback: (response: { reference: string }) => void
         onClose: () => void
       }) => { openIframe: () => void }
@@ -26,10 +31,27 @@ const tipAmounts = [50, 100, 200, 500, 1000]
 
 export default function TipJarPage() {
   const { user } = useAuth()
+  const router = useRouter()
   const [amount, setAmount] = useState(100)
   const [customAmount, setCustomAmount] = useState('')
   const [processing, setProcessing] = useState(false)
   const [email, setEmail] = useState('')
+  const [paystackKey, setPaystackKey] = useState('')
+
+  useEffect(() => {
+    async function fetchKey() {
+      try {
+        const docRef = doc(db, 'settings', 'site')
+        const snap = await getDoc(docRef)
+        if (snap.exists()) {
+          setPaystackKey(snap.data().paystackPublicKey)
+        }
+      } catch (err) {
+        console.error('Error fetching settings:', err)
+      }
+    }
+    fetchKey()
+  }, [])
 
   const handleTip = async () => {
     const tipEmail = user?.email || email
@@ -38,10 +60,15 @@ export default function TipJarPage() {
       return
     }
 
+    if (!paystackKey && !process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY) {
+      toast.error('Payment system not configured')
+      return
+    }
+
     const tipAmount = customAmount ? parseInt(customAmount) * 100 : amount * 100
 
-      if (tipAmount < 5000) {
-        toast.error('Minimum tip is KSh 50')
+    if (tipAmount < 5000) {
+      toast.error('Minimum tip is KSh 50')
       return
     }
 
@@ -64,30 +91,38 @@ export default function TipJarPage() {
         throw new Error(data.error || 'Failed to initialize payment')
       }
 
+      console.log('Initializing Paystack with key:', paystackKey || process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY)
       const handler = window.PaystackPop.setup({
-        key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || '',
+        key: paystackKey || process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || '',
         email: tipEmail,
         amount: tipAmount,
-          currency: 'KES',
+        currency: 'KES',
         ref: data.reference,
-        callback: async (response) => {
-          await fetch('/api/payments/verify', {
+        callback: function (response: { reference: string }) {
+          fetch('/api/payments/verify', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reference: response.reference })
           })
-          
-          toast.success('Thank you for your support! 🎉')
-          setProcessing(false)
+            .then(() => {
+              toast.success('Thank you for your support! 🎉')
+              setProcessing(false)
+              router.push(`/payment-success?reference=${response.reference}`)
+            })
+            .catch(() => {
+              toast.error('Verification failed via callback')
+              setProcessing(false)
+            })
         },
-        onClose: () => {
+        onClose: function () {
           setProcessing(false)
         }
       })
 
       handler.openIframe()
-    } catch {
-      toast.error('Failed to process tip')
+    } catch (e: any) {
+      console.error('Tip processing error:', e)
+      toast.error(`Failed to process tip: ${e.message || 'Unknown error'}`)
       setProcessing(false)
     }
   }
@@ -101,7 +136,7 @@ export default function TipJarPage() {
           </div>
           <h1 className="font-display text-5xl text-white mb-4">TIP JAR</h1>
           <p className="text-white/60">
-            Support DJ FLOWERZ and help keep the music flowing. 
+            Support DJ FLOWERZ and help keep the music flowing.
             Every tip helps create more amazing content!
           </p>
         </div>
@@ -130,20 +165,19 @@ export default function TipJarPage() {
                     setAmount(tip)
                     setCustomAmount('')
                   }}
-                  className={`py-3 rounded-xl font-semibold transition-all ${
-                    amount === tip && !customAmount
-                      ? 'bg-gradient-to-r from-pink-500 to-red-500 text-white'
-                      : 'bg-white/5 text-white/70 hover:bg-white/10'
-                  }`}
-                  >
-                    KSh {tip.toLocaleString()}
+                  className={`py-3 rounded-xl font-semibold transition-all ${amount === tip && !customAmount
+                    ? 'bg-gradient-to-r from-pink-500 to-red-500 text-white'
+                    : 'bg-white/5 text-white/70 hover:bg-white/10'
+                    }`}
+                >
+                  KSh {tip.toLocaleString()}
                 </button>
               ))}
             </div>
           </div>
 
           <div className="mb-6">
-              <label className="block text-white/70 text-sm mb-2">Or Enter Custom Amount (KSh)</label>
+            <label className="block text-white/70 text-sm mb-2">Or Enter Custom Amount (KSh)</label>
             <div className="relative">
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/50">KSh</span>
               <input
@@ -169,7 +203,7 @@ export default function TipJarPage() {
             ) : (
               <>
                 <Heart size={20} />
-                  Send Tip - KSh {(customAmount ? parseInt(customAmount) || 0 : amount).toLocaleString()}
+                Send Tip - KSh {(customAmount ? parseInt(customAmount) || 0 : amount).toLocaleString()}
               </>
             )}
           </button>

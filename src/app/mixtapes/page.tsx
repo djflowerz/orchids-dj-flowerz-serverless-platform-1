@@ -1,13 +1,26 @@
-import { supabase } from '@/lib/supabase'
+import { adminDb } from '@/lib/firebase-admin'
 import { Mixtape } from '@/lib/types'
 import { MixtapesList } from '@/components/mixtapes/MixtapesList'
 
 async function getMixtapes(): Promise<Mixtape[]> {
-  const { data } = await supabase
-    .from('mixtapes')
-    .select('*')
-    .order('created_at', { ascending: false })
-  return data || []
+  try {
+    const snapshot = await adminDb
+      .collection('mixtapes')
+      .orderBy('created_at', 'desc')
+      .get()
+
+    return snapshot.docs.map(doc => {
+      const data = doc.data()
+      return {
+        id: doc.id,
+        ...data,
+        created_at: data.created_at?.toDate?.().toISOString() || new Date().toISOString()
+      } as Mixtape
+    })
+  } catch (error) {
+    console.error('Error fetching mixtapes:', error)
+    return []
+  }
 }
 
 export const revalidate = 60

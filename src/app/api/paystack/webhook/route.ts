@@ -1,14 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminDb } from '@/lib/firebase-admin'
+import { FieldValue } from 'firebase-admin/firestore'
 import crypto from 'crypto'
 
-const SUBSCRIPTION_PLANS: Record<string, { tier: string; durationDays: number }> = {
-  '7u8-7dn081': { tier: 'weekly', durationDays: 7 },
-  'u0qw529xyk': { tier: 'monthly', durationDays: 30 },
-  'ayljjgzxzp': { tier: '3months', durationDays: 90 },
-  '5p4gjiehpv': { tier: '6months', durationDays: 180 },
-  'po2leez4hy': { tier: '12months', durationDays: 365 },
-}
+// SUBSCRIPTION_PLANS removed - dynamic lookup used
 
 async function sendTelegramNotification(message: string) {
   const botToken = process.env.TELEGRAM_BOT_TOKEN
@@ -28,6 +23,81 @@ async function sendTelegramNotification(message: string) {
     })
   } catch (error) {
     console.error('Telegram notification error:', error)
+  }
+}
+
+async function handleTelegramAccess(userId: string, action: 'add' | 'remove') {
+  try {
+    const settingsDoc = await adminDb.collection('settings').doc('site').get()
+    const settings = settingsDoc.data()
+    const botToken = process.env.TELEGRAM_BOT_TOKEN || settings?.telegramBotToken
+    const channels = settings?.telegramChannels || []
+
+    if (!botToken || channels.length === 0) return
+
+    const userDoc = await adminDb.collection('users').doc(userId).get()
+    const userData = userDoc.data()
+    const telegramId = userData?.telegram_id
+
+    if (!telegramId) return
+
+    for (const channel of channels) {
+      try {
+        if (action === 'remove') {
+          await fetch(`https://api.telegram.org/bot${botToken}/banChatMember`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: channel.chatId, user_id: telegramId })
+          })
+          // Unban immediately to allow rejoin
+          await fetch(`https://api.telegram.org/bot${botToken}/unbanChatMember`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: channel.chatId, user_id: telegramId })
+          })
+        } else {
+          // 'add' action: We ensure they are unbanned. 
+          // We can also send an invite link if we can generate one, 
+          // or assume they will click the channel link in the Dashboard.
+          await fetch(`https://api.telegram.org/bot${botToken}/unbanChatMember`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: channel.chatId, user_id: telegramId })
+          })
+
+          // Send a message to the user with the link?
+          // This requires the bot to have messaged the user first appropriately.
+          try {
+            const inviteLinkRes = await fetch(`https://api.telegram.org/bot${botToken}/createChatInviteLink`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: channel.chatId,
+                member_limit: 1,
+                expire_date: Math.floor(Date.now() / 1000) + 3600 // 1 hour
+              })
+            })
+            const inviteData = await inviteLinkRes.json()
+            if (inviteData.ok && inviteData.result?.invite_link) {
+              await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  chat_id: telegramId,
+                  text: `subscription Active! Here is your link for ${channel.name}: ${inviteData.result.invite_link}`
+                })
+              })
+            }
+          } catch (e) {
+            console.log('Could not send invite link', e)
+          }
+        }
+      } catch (err) {
+        console.error(`Error handling Telegram access (${action}) for ${channel.name}:`, err)
+      }
+    }
+  } catch (error) {
+    console.error('handleTelegramAccess error:', error)
   }
 }
 
@@ -73,11 +143,19 @@ export async function POST(request: NextRequest) {
       let subscriptionTier: string | null = null
       let durationDays = 0
 
-      for (const [shopId, plan] of Object.entries(SUBSCRIPTION_PLANS)) {
-        if (reference?.includes(shopId) || metadata?.plan_id === shopId) {
-          subscriptionTier = plan.tier
-          durationDays = plan.durationDays
-          break
+      if (metadata?.plan_id) {
+        const planDoc = await adminDb.collection('plans').doc(metadata.plan_id).get()
+        if (planDoc.exists) {
+          const planData = planDoc.data()
+          subscriptionTier = planData?.tier || 'basic'
+          const duration = planData?.duration
+          if (duration === 'year') {
+            durationDays = 365
+          } else if (duration === 'week') {
+            durationDays = 7
+          } else {
+            durationDays = 30 // Month default
+          }
         }
       }
 
@@ -112,11 +190,13 @@ export async function POST(request: NextRequest) {
         const endDate = new Date()
         endDate.setDate(endDate.getDate() + durationDays)
 
+        let userId = existingUser?.id
+
         if (existingUser) {
           await adminDb.collection('users').doc(existingUser.id).update({
             subscription_status: 'active',
             subscription_tier: subscriptionTier,
-            updatedAt: new Date().toISOString()
+            updatedAt: FieldValue.serverTimestamp()
           })
 
           const existingSubSnapshot = await adminDb.collection('subscriptions')
@@ -128,16 +208,16 @@ export async function POST(request: NextRequest) {
           if (!existingSubSnapshot.empty) {
             const existingSub = existingSubSnapshot.docs[0]
             const currentEndDate = new Date(existingSub.data().end_date)
-            const newEndDate = currentEndDate > new Date() 
+            const newEndDate = currentEndDate > new Date()
               ? new Date(currentEndDate.getTime() + durationDays * 24 * 60 * 60 * 1000)
               : endDate
 
             await existingSub.ref.update({
               tier: subscriptionTier,
-              end_date: newEndDate.toISOString(),
+              end_date: newEndDate.toISOString().split('T')[0],
               amount: amountKes,
               transaction_id: reference,
-              updatedAt: new Date().toISOString()
+              updatedAt: FieldValue.serverTimestamp()
             })
           } else {
             await adminDb.collection('subscriptions').add({
@@ -150,8 +230,8 @@ export async function POST(request: NextRequest) {
               payment_method: channel || 'paystack',
               transaction_id: reference,
               amount: amountKes,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString()
+              createdAt: FieldValue.serverTimestamp(),
+              updatedAt: FieldValue.serverTimestamp()
             })
           }
         } else {
@@ -161,9 +241,10 @@ export async function POST(request: NextRequest) {
             subscription_status: 'active',
             subscription_tier: subscriptionTier,
             role: 'user',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp()
           })
+          userId = newUserRef.id
 
           await adminDb.collection('subscriptions').add({
             user_id: newUserRef.id,
@@ -175,13 +256,18 @@ export async function POST(request: NextRequest) {
             payment_method: channel || 'paystack',
             transaction_id: reference,
             amount: amountKes,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp()
           })
         }
 
+        // Handle Telegram Access
+        if (userId) {
+          await handleTelegramAccess(userId, 'add')
+        }
+
         await adminDb.collection('transactions').add({
-          user_id: existingUser?.id || null,
+          user_id: existingUser?.id || userId || null, // Ensure userId is captured
           type: 'subscription',
           amount: amountKes,
           currency: 'KES',
@@ -189,15 +275,15 @@ export async function POST(request: NextRequest) {
           transaction_reference: reference,
           status: 'completed',
           notes: `Music Pool ${subscriptionTier} subscription via Paystack Shop`,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp()
         })
 
         await sendTelegramNotification(
           `🎉 <b>New Subscription!</b>\n\n` +
           `📧 Email: ${email}\n` +
           `💰 Amount: KSh ${amountKes.toLocaleString()}\n` +
-          `📦 Plan: ${subscriptionTier}\n` +
+          `📦 Plan: ${subscriptionTier} (${durationDays} days)\n` +
           `📅 Valid until: ${endDate.toLocaleDateString()}\n` +
           `🔗 Ref: ${reference}`
         )
@@ -215,8 +301,8 @@ export async function POST(request: NextRequest) {
           transaction_reference: reference,
           status: 'completed',
           notes: `Payment via Paystack`,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp()
         })
 
         await sendTelegramNotification(

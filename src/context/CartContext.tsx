@@ -5,16 +5,18 @@ import { Product, Mixtape } from '@/lib/types'
 
 interface CartItemData {
   id: string
+  uniqueKey: string // New unique key to distinguish variants
   type: 'product' | 'mixtape'
   item: Product | Mixtape
   quantity: number
+  selectedOptions?: Record<string, string>
 }
 
 interface CartContextType {
   items: CartItemData[]
-  addToCart: (item: Product | Mixtape, type: 'product' | 'mixtape') => void
-  removeFromCart: (id: string) => void
-  updateQuantity: (id: string, quantity: number) => void
+  addToCart: (item: Product | Mixtape, type: 'product' | 'mixtape', options?: Record<string, string>) => void
+  removeFromCart: (uniqueKey: string) => void
+  updateQuantity: (uniqueKey: string, quantity: number) => void
   clearCart: () => void
   itemCount: number
   total: number
@@ -36,34 +38,43 @@ export function CartProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('dj_flowerz_cart', JSON.stringify(items))
   }, [items])
 
-  function addToCart(item: Product | Mixtape, type: 'product' | 'mixtape') {
+  function addToCart(item: Product | Mixtape, type: 'product' | 'mixtape', options?: Record<string, string>) {
+    const uniqueKey = options
+      ? `${item.id}-${JSON.stringify(options)}`
+      : item.id
+
     setItems(prev => {
-      const existing = prev.find(i => i.id === item.id && i.type === type)
+      const existing = prev.find(i => i.uniqueKey === uniqueKey)
       if (existing) {
         if (type === 'product' && (item as Product).product_type === 'physical') {
           return prev.map(i =>
-            i.id === item.id && i.type === type
+            i.uniqueKey === uniqueKey
               ? { ...i, quantity: i.quantity + 1 }
               : i
           )
         }
         return prev
       }
-      return [...prev, { id: item.id, type, item, quantity: 1 }]
+      return [...prev, {
+        id: item.id,
+        uniqueKey,
+        type,
+        item,
+        quantity: 1,
+        selectedOptions: options
+      }]
     })
   }
 
-  function removeFromCart(id: string) {
-    setItems(prev => prev.filter(i => i.id !== id))
+  function removeFromCart(uniqueKey: string) {
+    setItems(prev => prev.filter(i => i.uniqueKey !== uniqueKey))
   }
 
-  function updateQuantity(id: string, quantity: number) {
-    if (quantity < 1) {
-      removeFromCart(id)
-      return
-    }
+  function updateQuantity(uniqueKey: string, quantity: number) {
     setItems(prev =>
-      prev.map(i => (i.id === id ? { ...i, quantity } : i))
+      prev.map(i =>
+        i.uniqueKey === uniqueKey ? { ...i, quantity } : i
+      )
     )
   }
 

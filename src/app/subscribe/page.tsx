@@ -15,6 +15,7 @@ declare global {
         amount: number
         currency: string
         ref: string
+        metadata?: Record<string, unknown>
         callback: (response: { reference: string }) => void
         onClose: () => void
       }) => { openIframe: () => void }
@@ -22,13 +23,18 @@ declare global {
   }
 }
 
-const subscriptionTiers = [
-  { id: '1_week', name: '1 Week', price: 200, duration: 7, popular: false },
-  { id: '1_month', name: '1 Month', price: 700, duration: 30, popular: true },
-  { id: '3_months', name: '3 Months', price: 1800, duration: 90, popular: false },
-  { id: '6_months', name: '6 Months', price: 3500, duration: 180, popular: false },
-  { id: '12_months', name: '12 Months', price: 6000, duration: 365, popular: false },
-]
+import { db } from '@/lib/firebase'
+import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebase/firestore'
+import { useEffect } from 'react'
+
+export interface Plan {
+  id: string
+  name: string
+  price: number
+  duration: string
+  features: string[]
+  tier: string
+}
 
 const benefits = [
   'Unlimited access to Music Pool',
@@ -41,9 +47,46 @@ const benefits = [
 
 export default function SubscribePage() {
   const { user } = useAuth()
-  const [selectedTier, setSelectedTier] = useState(subscriptionTiers[1])
+  const [plans, setPlans] = useState<Plan[]>([])
+  const [selectedTier, setSelectedTier] = useState<Plan | null>(null)
   const [processing, setProcessing] = useState(false)
   const [email, setEmail] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [paystackKey, setPaystackKey] = useState('')
+
+  useEffect(() => {
+    async function init() {
+      try {
+        // Fetch Plans
+        const q = query(collection(db, 'plans'), orderBy('price', 'asc'))
+        const snap = await getDocs(q)
+        const fetchedPlans = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Plan[]
+        setPlans(fetchedPlans)
+        if (fetchedPlans.length > 0) setSelectedTier(fetchedPlans[1] || fetchedPlans[0])
+
+        // Fetch Settings
+        const settingsSnap = await getDoc(doc(db, 'settings', 'site'))
+        if (settingsSnap.exists()) {
+          setPaystackKey(settingsSnap.data().paystackPublicKey)
+        }
+      } catch (err) {
+        console.error('Error initializing:', err)
+        toast.error('Failed to load data')
+      } finally {
+        setLoading(false)
+      }
+    }
+    init()
+  }, [])
+
+  const getDurationDays = (duration: string) => {
+    switch (duration) {
+      case 'week': return 7
+      case 'month': return 30
+      case 'year': return 365
+      default: return 30
+    }
+  }
 
   const handleSubscribe = async () => {
     const subscribeEmail = user?.email || email
@@ -54,15 +97,17 @@ export default function SubscribePage() {
 
     setProcessing(true)
 
+    if (!selectedTier) return
+
     try {
       const response = await fetch('/api/subscriptions/initialize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: subscribeEmail,
-          tier: selectedTier.id,
-          amount: selectedTier.price * 100,
-          duration: selectedTier.duration
+          tier: selectedTier.id, // Using Plan ID
+          amount: selectedTier.price, // Stored as Cents in DB
+          duration: getDurationDays(selectedTier.duration)
         })
       })
 
@@ -73,9 +118,10 @@ export default function SubscribePage() {
       }
 
       const handler = window.PaystackPop.setup({
-        key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || '',
+        key: paystackKey || process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || '',
         email: subscribeEmail,
-        amount: selectedTier.price * 100,
+        amount: selectedTier.price, // Cents
+
         currency: 'KES',
         ref: data.reference,
         callback: async (response) => {
@@ -84,9 +130,9 @@ export default function SubscribePage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reference: response.reference })
           })
-          
+
           const verifyData = await verifyResponse.json()
-          
+
           if (verifyData.success) {
             toast.success('Welcome to the crew! Subscription activated.')
             window.location.href = '/music-pool'
@@ -101,7 +147,7 @@ export default function SubscribePage() {
       })
 
       handler.openIframe()
-    } catch {
+    } catch (e: any) {
       toast.error('Failed to process subscription')
       setProcessing(false)
     }
@@ -115,35 +161,36 @@ export default function SubscribePage() {
             <Crown size={16} />
             <span>DJ FLOWERZ Premium</span>
           </div>
-          
+
           <h1 className="font-display text-5xl sm:text-6xl text-white mb-4">
             UNLOCK THE <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-500">VAULT</span>
           </h1>
-          
+
           <p className="text-white/60 text-lg max-w-xl mx-auto">
             Get unlimited access to the Music Pool, exclusive tracks, and premium features. Join the elite DJs worldwide.
           </p>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-8">
-          {subscriptionTiers.map((tier) => (
+          {loading ? (
+            <div className="text-white/50 col-span-5 text-center">Loading plans...</div>
+          ) : plans.map((tier) => (
             <button
               key={tier.id}
               onClick={() => setSelectedTier(tier)}
-              className={`relative p-4 rounded-xl transition-all ${
-                selectedTier.id === tier.id
-                  ? 'bg-gradient-to-br from-amber-500/30 to-orange-500/30 border-2 border-amber-400 shadow-lg shadow-amber-500/20'
-                  : 'bg-white/5 border border-white/10 hover:border-white/20'
-              }`}
+              className={`relative p-4 rounded-xl transition-all ${selectedTier?.id === tier.id
+                ? 'bg-gradient-to-br from-amber-500/30 to-orange-500/30 border-2 border-amber-400 shadow-lg shadow-amber-500/20'
+                : 'bg-white/5 border border-white/10 hover:border-white/20'
+                }`}
             >
-              {tier.popular && (
+              {tier.duration === 'month' && tier.price >= 80000 && ( // Ad-hoc popularity check
                 <div className="absolute -top-2 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-gradient-to-r from-amber-400 to-orange-500 rounded-full text-[10px] font-bold text-black">
                   POPULAR
                 </div>
               )}
-              <div className="text-white/70 text-xs mb-1">{tier.name}</div>
+              <div className="text-white/70 text-xs mb-1 capitalize">{tier.name}</div>
               <div className="text-white font-bold text-lg">
-                KSh {tier.price.toLocaleString()}
+                KSh {(tier.price / 100).toLocaleString()}
               </div>
             </button>
           ))}
@@ -170,16 +217,15 @@ export default function SubscribePage() {
               <Music size={20} className="text-fuchsia-400" />
               Selected Plan
             </h3>
-            
             <div className="mb-6">
               <div className="text-white/60 text-sm">Duration</div>
-              <div className="text-white text-2xl font-bold">{selectedTier.name}</div>
+              <div className="text-white text-2xl font-bold">{selectedTier?.name || 'Select a plan'}</div>
             </div>
-            
+
             <div className="mb-6">
               <div className="text-white/60 text-sm">Total</div>
               <div className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-500">
-                KSh {selectedTier.price.toLocaleString()}
+                KSh {selectedTier ? (selectedTier.price / 100).toLocaleString() : '0'}
               </div>
             </div>
 
@@ -217,8 +263,8 @@ export default function SubscribePage() {
         </div>
 
         <div className="text-center">
-          <Link 
-            href="/tip-jar" 
+          <Link
+            href="/tip-jar"
             className="inline-flex items-center gap-2 text-white/50 hover:text-pink-400 transition-colors"
           >
             <Heart size={16} />

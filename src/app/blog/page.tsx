@@ -1,15 +1,29 @@
-import { supabase } from '@/lib/supabase'
+import { adminDb } from '@/lib/firebase-admin'
 import { BlogPost } from '@/lib/types'
 import Link from 'next/link'
 import Image from 'next/image'
 import { Calendar, User, ArrowRight } from 'lucide-react'
 
 async function getBlogPosts(): Promise<BlogPost[]> {
-  const { data } = await supabase
-    .from('blog_posts')
-    .select('*')
-    .order('created_at', { ascending: false })
-  return data || []
+  try {
+    const snapshot = await adminDb
+      .collection('blog_posts')
+      .orderBy('created_at', 'desc')
+      .get()
+
+    return snapshot.docs.map(doc => {
+      const data = doc.data()
+      return {
+        id: doc.id,
+        ...data,
+        created_at: data.created_at?.toDate?.().toISOString() || new Date().toISOString(),
+        updated_at: data.updated_at?.toDate?.().toISOString() || new Date().toISOString()
+      } as BlogPost
+    })
+  } catch (error) {
+    console.error('Error fetching blog posts:', error)
+    return []
+  }
 }
 
 export default async function BlogPage() {

@@ -64,26 +64,27 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-<html lang="en">
-        <head>
-          <link rel="apple-touch-icon" href="/icon-192.png" />
-          <meta name="apple-mobile-web-app-capable" content="yes" />
-        </head>
-        <body className="antialiased">
-          <Script
-            id="sw-register"
-            strategy="afterInteractive"
-            dangerouslySetInnerHTML={{
-              __html: `
+    <html lang="en">
+      <head>
+        <link rel="apple-touch-icon" href="/icon-192.png" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+      </head>
+      <body className="antialiased">
+        <Script src="https://js.paystack.co/v1/inline.js" strategy="lazyOnload" />
+        <Script
+          id="sw-register"
+          strategy="afterInteractive"
+          dangerouslySetInnerHTML={{
+            __html: `
                 if ('serviceWorker' in navigator) {
                   window.addEventListener('load', function() {
                     navigator.serviceWorker.register('/sw.js');
                   });
                 }
               `,
-            }}
-          />
-          <Script
+          }}
+        />
+        <Script
           id="orchids-browser-logs"
           src="https://slelguoygbfzlpylpxfs.supabase.co/storage/v1/object/public/scripts/orchids-browser-logs.js"
           strategy="afterInteractive"

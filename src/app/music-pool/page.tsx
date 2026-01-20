@@ -1,7 +1,8 @@
 "use client"
 
 import { useAuth } from '@/context/AuthContext'
-import { supabase } from '@/lib/supabase'
+import { db } from '@/lib/firebase'
+import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore'
 import { useState, useEffect } from 'react'
 import { Lock, Search, Play, Download, Crown, Filter, Calendar } from 'lucide-react'
 import Link from 'next/link'
@@ -33,7 +34,7 @@ const genres = ['All', 'Afrobeats', 'Amapiano', 'Hip Hop', 'R&B', 'Dancehall', '
 const years = ['All', '2024', '2023', '2022', '2021', '2020']
 
 export default function MusicPoolPage() {
-  const { user, loading: authLoading } = useAuth()
+  const { user, loading: authLoading, isAdmin } = useAuth()
   const [tracks, setTracks] = useState<MusicPoolTrack[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -48,40 +49,70 @@ export default function MusicPoolPage() {
 
   useEffect(() => {
     async function checkSubscription() {
+      // Admin always has access
+      if (isAdmin) {
+        setHasActiveSubscription(true)
+        return
+      }
+
       if (!user) {
         setHasActiveSubscription(false)
         return
       }
-      
-      const { data: subscription } = await supabase
-        .from('subscriptions')
-        .select('status, ends_at')
-        .eq('user_id', user.id)
-        .eq('status', 'active')
-        .single()
-      
-      if (subscription?.ends_at) {
-        const endDate = new Date(subscription.ends_at)
-        setHasActiveSubscription(endDate > new Date())
-      } else {
+
+      try {
+        const q = query(
+          collection(db, 'subscriptions'),
+          where('user_id', '==', user.id),
+          where('status', '==', 'active'),
+          limit(1)
+        )
+        const snapshot = await getDocs(q)
+
+        if (!snapshot.empty) {
+          const subscription = snapshot.docs[0].data()
+          if (subscription.ends_at) {
+            const endDate = subscription.ends_at.toDate ? subscription.ends_at.toDate() : new Date(subscription.ends_at)
+            setHasActiveSubscription(endDate > new Date())
+          } else {
+            // If active status but no end date, assume valid (e.g. lifetime or recurring without set end)
+            setHasActiveSubscription(true)
+          }
+        } else {
+          setHasActiveSubscription(false)
+        }
+      } catch (error) {
+        console.error('Error checking subscription:', error)
         setHasActiveSubscription(false)
       }
     }
-    
+
     if (!authLoading) {
       checkSubscription()
     }
-  }, [user, authLoading])
+  }, [user, authLoading, isAdmin])
 
   useEffect(() => {
     async function fetchTracks() {
-      const { data } = await supabase
-        .from('music_pool')
-        .select('*')
-        .eq('is_active', true)
-        .order('created_at', { ascending: false })
-      setTracks(data || [])
-      setLoading(false)
+      try {
+        const q = query(
+          collection(db, 'music_pool'),
+          where('is_active', '==', true),
+          orderBy('created_at', 'desc')
+        )
+        const snapshot = await getDocs(q)
+        const data = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          created_at: doc.data().created_at?.toDate?.().toISOString() || new Date().toISOString()
+        })) as MusicPoolTrack[]
+        setTracks(data)
+      } catch (error) {
+        console.error('Error fetching tracks:', error)
+        setTracks([])
+      } finally {
+        setLoading(false)
+      }
     }
     fetchTracks()
   }, [])
@@ -115,10 +146,10 @@ export default function MusicPoolPage() {
           </div>
           <h1 className="font-display text-4xl text-white mb-4">MUSIC POOL</h1>
           <p className="text-white/60 mb-8">
-            Get unlimited access to exclusive DJ edits, remixes, and tools. 
+            Get unlimited access to exclusive DJ edits, remixes, and tools.
             Subscribe to unlock the full music pool and join our Telegram community.
           </p>
-          
+
           <div className="space-y-4 mb-8">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="p-5 rounded-2xl bg-white/5 border border-white/10 hover:border-fuchsia-500/30 transition-all">
@@ -133,7 +164,7 @@ export default function MusicPoolPage() {
                   Subscribe
                 </a>
               </div>
-              
+
               <div className="p-5 rounded-2xl bg-gradient-to-br from-fuchsia-500/20 to-cyan-500/20 border border-fuchsia-500/30 relative">
                 <div className="absolute -top-2 -right-2 px-2 py-1 bg-fuchsia-500 text-white text-xs font-bold rounded-full">POPULAR</div>
                 <div className="text-white/50 text-sm mb-1">1 Month</div>
@@ -207,7 +238,7 @@ export default function MusicPoolPage() {
               <li>Unlimited downloads • Weekly new releases</li>
               <li>Exclusive DJ edits • Telegram group access</li>
             </ul>
-            
+
             {!user && (
               <Link
                 href="/login"
@@ -251,9 +282,8 @@ export default function MusicPoolPage() {
           </div>
           <button
             onClick={() => setShowFilters(!showFilters)}
-            className={`px-4 py-2 rounded-xl flex items-center gap-2 transition-all ${
-              showFilters ? 'bg-fuchsia-500 text-white' : 'bg-white/5 text-white/70 hover:bg-white/10'
-            }`}
+            className={`px-4 py-2 rounded-xl flex items-center gap-2 transition-all ${showFilters ? 'bg-fuchsia-500 text-white' : 'bg-white/5 text-white/70 hover:bg-white/10'
+              }`}
           >
             <Filter size={18} />
             Filters
@@ -272,11 +302,10 @@ export default function MusicPoolPage() {
                 <button
                   key={g}
                   onClick={() => setGenreFilter(g)}
-                  className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                    genreFilter === g
-                      ? 'bg-fuchsia-500 text-white'
-                      : 'bg-white/5 text-white/70 hover:bg-white/10'
-                  }`}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${genreFilter === g
+                    ? 'bg-fuchsia-500 text-white'
+                    : 'bg-white/5 text-white/70 hover:bg-white/10'
+                    }`}
                 >
                   {g}
                 </button>
@@ -289,11 +318,10 @@ export default function MusicPoolPage() {
                 <button
                   key={y}
                   onClick={() => setYearFilter(y)}
-                  className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all flex items-center gap-1 ${
-                    yearFilter === y
-                      ? 'bg-cyan-500 text-white'
-                      : 'bg-white/5 text-white/70 hover:bg-white/10'
-                  }`}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all flex items-center gap-1 ${yearFilter === y
+                    ? 'bg-cyan-500 text-white'
+                    : 'bg-white/5 text-white/70 hover:bg-white/10'
+                    }`}
                 >
                   {y !== 'All' && <Calendar size={12} />}
                   {y}
@@ -307,11 +335,10 @@ export default function MusicPoolPage() {
                 <button
                   key={v}
                   onClick={() => setVersionFilter(v)}
-                  className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                    versionFilter === v
-                      ? 'bg-fuchsia-500 text-white'
-                      : 'bg-white/5 text-white/70 hover:bg-white/10'
-                  }`}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${versionFilter === v
+                    ? 'bg-fuchsia-500 text-white'
+                    : 'bg-white/5 text-white/70 hover:bg-white/10'
+                    }`}
                 >
                   {v}
                 </button>
@@ -324,11 +351,10 @@ export default function MusicPoolPage() {
                 <button
                   key={k}
                   onClick={() => setKeyFilter(k)}
-                  className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                    keyFilter === k
-                      ? 'bg-cyan-500 text-white'
-                      : 'bg-white/5 text-white/70 hover:bg-white/10'
-                  }`}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${keyFilter === k
+                    ? 'bg-cyan-500 text-white'
+                    : 'bg-white/5 text-white/70 hover:bg-white/10'
+                    }`}
                 >
                   {k}
                 </button>
@@ -341,11 +367,10 @@ export default function MusicPoolPage() {
                 <button
                   key={t}
                   onClick={() => setTierFilter(t)}
-                  className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                    tierFilter === t
-                      ? 'bg-amber-500 text-white'
-                      : 'bg-white/5 text-white/70 hover:bg-white/10'
-                  }`}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${tierFilter === t
+                    ? 'bg-amber-500 text-white'
+                    : 'bg-white/5 text-white/70 hover:bg-white/10'
+                    }`}
                 >
                   {t}
                 </button>
@@ -406,7 +431,7 @@ export default function MusicPoolPage() {
                     <Play size={24} className="text-white" />
                   </div>
                 </div>
-                
+
                 <div className="flex-1 min-w-0">
                   <h3 className="text-white font-semibold truncate">{track.title}</h3>
                   <p className="text-white/50 text-sm truncate">{track.artist}</p>
@@ -419,11 +444,10 @@ export default function MusicPoolPage() {
                   {track.bpm && <span className="px-2 py-1 rounded bg-white/5">{track.bpm} BPM</span>}
                   {track.music_key && <span className="px-2 py-1 rounded bg-white/5">{track.music_key}</span>}
                   {track.version && (
-                    <span className={`px-2 py-1 rounded ${
-                      track.version === 'Clean' ? 'bg-green-500/20 text-green-400' :
+                    <span className={`px-2 py-1 rounded ${track.version === 'Clean' ? 'bg-green-500/20 text-green-400' :
                       track.version === 'Dirty' ? 'bg-red-500/20 text-red-400' :
-                      'bg-blue-500/20 text-blue-400'
-                    }`}>
+                        'bg-blue-500/20 text-blue-400'
+                      }`}>
                       {track.version}
                     </span>
                   )}

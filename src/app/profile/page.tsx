@@ -1,7 +1,8 @@
 "use client"
 
 import { useAuth } from '@/context/AuthContext'
-import { supabase } from '@/lib/supabase'
+import { db } from '@/lib/firebase'
+import { collection, query, where, getDocs, orderBy, updateDoc, doc } from 'firebase/firestore'
 import { Payment } from '@/lib/types'
 import { useEffect, useState } from 'react'
 import { User, Crown, Package, Clock, Send, Settings, Shield } from 'lucide-react'
@@ -22,21 +23,35 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (authLoading) return
-    
+
     if (!user) {
       router.replace('/login')
       return
     }
 
     async function fetchOrders() {
-      const { data } = await supabase
-        .from('payments')
-        .select('*')
-        .eq('user_email', user?.email)
-        .eq('status', 'success')
-        .order('created_at', { ascending: false })
-      setOrders(data || [])
-      setLoading(false)
+      try {
+        const q = query(
+          collection(db, 'payments'),
+          where('user_email', '==', user?.email),
+          where('status', '==', 'success'),
+          orderBy('created_at', 'desc')
+        )
+        const snapshot = await getDocs(q)
+        const data = snapshot.docs.map(doc => {
+          const d = doc.data()
+          return {
+            id: doc.id,
+            ...d,
+            created_at: d.created_at?.toDate?.().toISOString() || new Date().toISOString()
+          }
+        }) as Payment[]
+        setOrders(data)
+      } catch (error) {
+        console.error('Error fetching orders:', error)
+      } finally {
+        setLoading(false)
+      }
     }
 
     fetchOrders()
@@ -49,17 +64,14 @@ export default function ProfilePage() {
       return
     }
 
-    const { error } = await supabase
-      .from('profiles')
-      .update({ telegram_username: telegramUsername })
-      .eq('id', user?.id)
-
-    if (error) {
+    try {
+      if (!user?.id) return
+      await updateDoc(doc(db, 'users', user.id), { telegram_username: telegramUsername })
+      toast.success('Telegram linked successfully!')
+    } catch (error) {
+      console.error('Error linking telegram:', error)
       toast.error('Failed to link Telegram')
-      return
     }
-
-    toast.success('Telegram linked successfully!')
   }
 
   const handleSubscribe = async () => {
@@ -117,9 +129,8 @@ export default function ProfilePage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <span className={`px-3 py-1 rounded-full text-sm ${
-                isAdminUser ? 'bg-yellow-500/20 text-yellow-400' : 'bg-white/5 text-white/50'
-              }`}>
+              <span className={`px-3 py-1 rounded-full text-sm ${isAdminUser ? 'bg-yellow-500/20 text-yellow-400' : 'bg-white/5 text-white/50'
+                }`}>
                 {isAdminUser ? 'Admin' : 'Member'}
               </span>
             </div>
@@ -181,7 +192,7 @@ export default function ProfilePage() {
             <Package size={24} className="text-fuchsia-400" />
             <h3 className="text-white font-semibold">Order History</h3>
           </div>
-          
+
           {loading ? (
             <div className="text-center py-8">
               <div className="w-8 h-8 border-2 border-fuchsia-500 border-t-transparent rounded-full animate-spin mx-auto" />

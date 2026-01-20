@@ -1,10 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+import { adminDb } from '@/lib/firebase-admin'
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
@@ -15,43 +10,54 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const { data: tokenData, error: tokenError } = await supabase
-      .from('download_tokens')
-      .select('*, products(*)')
-      .eq('token', token)
-      .single()
+    const tokensSnapshot = await adminDb.collection('download_tokens').where('token', '==', token).limit(1).get()
 
-    if (tokenError || !tokenData) {
+    if (tokensSnapshot.empty) {
       return NextResponse.json({ error: 'Invalid download link' }, { status: 404 })
     }
+
+    const tokenDoc = tokensSnapshot.docs[0]
+    const tokenData = tokenDoc.data()
 
     if (new Date(tokenData.expires_at) < new Date()) {
       return NextResponse.json({ error: 'Download link has expired' }, { status: 410 })
     }
 
-    if (tokenData.max_downloads && tokenData.download_count >= tokenData.max_downloads) {
+    // Default download_count to 0 if missing
+    const downloadCount = tokenData.download_count || 0
+
+    if (tokenData.max_downloads && downloadCount >= tokenData.max_downloads) {
       return NextResponse.json({ error: 'Download limit reached' }, { status: 403 })
     }
 
-    const product = tokenData.products
-    if (!product || !product.is_active) {
+    const productDoc = await adminDb.collection('products').doc(tokenData.product_id).get()
+
+    if (!productDoc.exists) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+    }
+
+    const product = productDoc.data()!
+
+    // Check availability
+    if (!product.is_active && product.status !== 'active') {
       return NextResponse.json({ error: 'Product not available' }, { status: 404 })
     }
 
     return NextResponse.json({
-      id: tokenData.id,
+      id: tokenDoc.id,
       expires_at: tokenData.expires_at,
-      download_count: tokenData.download_count,
+      download_count: downloadCount,
       max_downloads: tokenData.max_downloads,
       products: {
-        id: product.id,
+        id: productDoc.id,
         title: product.title,
         description: product.description,
         instructions: product.instructions,
         access_password: product.access_password,
         cover_images: product.cover_images || [],
         image_url: product.image_url,
-        files: product.files || [],
+        // Handle files array fallback
+        files: product.files || (product.download_file_path ? [{ url: product.download_file_path, name: product.title, size: 0 }] : []),
         version: product.version
       }
     })

@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase'
+import { adminDb } from '@/lib/firebase-admin'
 import { BlogPost } from '@/lib/types'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -6,12 +6,27 @@ import { ArrowLeft, Calendar, User, Share2 } from 'lucide-react'
 import { notFound } from 'next/navigation'
 
 async function getPost(slug: string): Promise<BlogPost | null> {
-  const { data } = await supabase
-    .from('blog_posts')
-    .select('*')
-    .eq('slug', slug)
-    .single()
-  return data
+  try {
+    const snapshot = await adminDb
+      .collection('blog_posts')
+      .where('slug', '==', slug)
+      .limit(1)
+      .get()
+
+    if (snapshot.empty) return null
+
+    const doc = snapshot.docs[0]
+    const data = doc.data()
+    return {
+      id: doc.id,
+      ...data,
+      created_at: data.created_at?.toDate?.().toISOString() || new Date().toISOString(),
+      updated_at: data.updated_at?.toDate?.().toISOString() || new Date().toISOString()
+    } as BlogPost
+  } catch (error) {
+    console.error('Error fetching blog post:', error)
+    return null
+  }
 }
 
 export default async function BlogPostPage({ params }: { params: { slug: string } }) {
@@ -32,7 +47,7 @@ export default async function BlogPostPage({ params }: { params: { slug: string 
           className="object-cover"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
-        
+
         <div className="absolute top-4 left-4">
           <Link href="/blog" className="flex items-center gap-2 text-white/70 hover:text-white transition-colors bg-black/20 backdrop-blur-sm px-4 py-2 rounded-full border border-white/10">
             <ArrowLeft size={20} />

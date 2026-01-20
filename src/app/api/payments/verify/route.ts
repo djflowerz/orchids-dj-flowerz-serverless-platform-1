@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminDb } from '@/lib/firebase-admin'
+import { FieldValue } from 'firebase-admin/firestore'
 
 async function sendTelegramNotification(message: string) {
   const botToken = process.env.TELEGRAM_BOT_TOKEN
@@ -62,8 +63,8 @@ export async function POST(request: NextRequest) {
 
     await adminDb.collection('payments').doc(reference).update({
       status: 'success',
-      paystack_ref: paystackData.data.reference,
-      updatedAt: new Date().toISOString()
+      paystack_reference: paystackData.data.reference,
+      updatedAt: FieldValue.serverTimestamp()
     })
 
     const metadata = payment.metadata as { items?: Array<{ id: string; type: string; quantity: number }> }
@@ -76,13 +77,59 @@ export async function POST(request: NextRequest) {
           user_email: payment.user_email,
           product_id: item.id,
           payment_id: payment.id,
-          createdAt: new Date().toISOString()
+          createdAt: FieldValue.serverTimestamp()
         })
 
         const productRef = adminDb.collection('products').doc(item.id)
         const productDoc = await productRef.get()
         const product = productDoc.data()
 
+        // Grant digital product access
+        if (product?.product_type === 'digital') {
+          // Find user by email
+          const usersSnapshot = await adminDb.collection('users')
+            .where('email', '==', payment.user_email)
+            .limit(1)
+            .get()
+
+          if (!usersSnapshot.empty) {
+            const userDoc = usersSnapshot.docs[0]
+            const userData = userDoc.data()
+            const existingAccess = userData.productsAccess || []
+
+            // Check if user already has access to this product
+            const hasAccess = existingAccess.some((p: any) => p.productId === item.id)
+
+            if (!hasAccess) {
+              // Grant new access with 1 download
+              const newAccess = {
+                productId: item.id,
+                productTitle: product.title,
+                downloadsRemaining: 1,
+                paidAt: FieldValue.serverTimestamp(),
+                paymentReference: reference,
+                expiresAt: null // Set if subscription-based
+              }
+
+              await userDoc.ref.update({
+                productsAccess: [...existingAccess, newAccess]
+              })
+            } else {
+              // User repurchased - add another download
+              const updatedAccess = existingAccess.map((p: any) =>
+                p.productId === item.id
+                  ? { ...p, downloadsRemaining: (p.downloadsRemaining || 0) + 1, lastPurchasedAt: FieldValue.serverTimestamp() }
+                  : p
+              )
+
+              await userDoc.ref.update({
+                productsAccess: updatedAccess
+              })
+            }
+          }
+        }
+
+        // Handle physical product stock
         if (product?.product_type === 'physical' && (product.stock_quantity || 0) > 0) {
           const newStock = Math.max(0, (product.stock_quantity || 0) - (item.quantity || 1))
           await productRef.update({ stock_quantity: newStock })
@@ -99,7 +146,7 @@ export async function POST(request: NextRequest) {
           user_email: payment.user_email,
           mixtape_id: item.id,
           payment_id: payment.id,
-          createdAt: new Date().toISOString()
+          createdAt: FieldValue.serverTimestamp()
         })
 
         // Increment download count
@@ -114,7 +161,7 @@ export async function POST(request: NextRequest) {
     }
 
     const amount = paystackData.data.amount / 100
-    
+
     // Log in transactions table
     await adminDb.collection('transactions').add({
       user_id: payment.user_id || null,
@@ -126,7 +173,7 @@ export async function POST(request: NextRequest) {
       transaction_reference: reference,
       status: 'completed',
       notes: `Payment for ${payment.payment_type || 'purchase'}`,
-      createdAt: new Date().toISOString()
+      createdAt: FieldValue.serverTimestamp()
     })
 
     await sendTelegramNotification(

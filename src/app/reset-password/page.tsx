@@ -1,13 +1,14 @@
 "use client"
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Lock, ArrowRight, Eye, EyeOff, CheckCircle } from 'lucide-react'
 import { toast } from 'sonner'
-import { supabase } from '@/lib/supabase'
+import { auth } from '@/lib/firebase'
+import { confirmPasswordReset } from 'firebase/auth'
 
-export default function ResetPasswordPage() {
+function ResetPasswordContent() {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -15,22 +16,20 @@ export default function ResetPasswordPage() {
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const oobCode = searchParams.get('oobCode')
 
   useEffect(() => {
-    const hashParams = new URLSearchParams(window.location.hash.substring(1))
-    const accessToken = hashParams.get('access_token')
-    const refreshToken = hashParams.get('refresh_token')
-    
-    if (accessToken && refreshToken) {
-      supabase.auth.setSession({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-      })
+    if (!oobCode) {
+      toast.error('Invalid or missing reset code')
+      router.push('/login')
     }
-  }, [])
+  }, [oobCode, router])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+
+    if (!oobCode) return
 
     if (password !== confirmPassword) {
       toast.error('Passwords do not match')
@@ -44,22 +43,17 @@ export default function ResetPasswordPage() {
 
     setLoading(true)
 
-    const { error } = await supabase.auth.updateUser({
-      password: password,
-    })
-
-    if (error) {
+    try {
+      await confirmPasswordReset(auth, oobCode, password)
+      setSuccess(true)
+      setTimeout(() => {
+        router.push('/login')
+      }, 3000)
+    } catch (error: any) {
       toast.error(error.message)
+    } finally {
       setLoading(false)
-      return
     }
-
-    setSuccess(true)
-    setLoading(false)
-    
-    setTimeout(() => {
-      router.push('/login')
-    }, 3000)
   }
 
   if (success) {
@@ -133,13 +127,12 @@ export default function ResetPasswordPage() {
                 placeholder="••••••••"
                 required
                 minLength={6}
-                className={`w-full pl-11 pr-12 py-3 rounded-xl bg-white/5 border text-white placeholder:text-white/40 focus:outline-none transition-colors ${
-                  confirmPassword && password !== confirmPassword 
-                    ? 'border-red-500/50 focus:border-red-500' 
-                    : confirmPassword && password === confirmPassword
+                className={`w-full pl-11 pr-12 py-3 rounded-xl bg-white/5 border text-white placeholder:text-white/40 focus:outline-none transition-colors ${confirmPassword && password !== confirmPassword
+                  ? 'border-red-500/50 focus:border-red-500'
+                  : confirmPassword && password === confirmPassword
                     ? 'border-green-500/50 focus:border-green-500'
                     : 'border-white/10 focus:border-fuchsia-500/50'
-                }`}
+                  }`}
               />
               <button
                 type="button"
@@ -171,5 +164,17 @@ export default function ResetPasswordPage() {
         </form>
       </div>
     </div>
+  )
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-fuchsia-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <ResetPasswordContent />
+    </Suspense>
   )
 }

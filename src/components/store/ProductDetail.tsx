@@ -9,7 +9,8 @@ import { useAuth } from '@/context/AuthContext'
 import { useCart } from '@/context/CartContext'
 import { Product, ProductReview } from '@/lib/types'
 import { formatCurrency } from '@/lib/utils'
-import { supabase } from '@/lib/supabase'
+import { db } from '@/lib/firebase'
+import { collection, query, where, getDocs, addDoc, orderBy, Timestamp } from 'firebase/firestore'
 import { motion } from 'framer-motion'
 
 export function ProductDetail({ product }: { product: Product }) {
@@ -33,10 +34,18 @@ export function ProductDetail({ product }: { product: Product }) {
     country: 'Kenya'
   })
   const [showShippingForm, setShowShippingForm] = useState(false)
+  const [activeImage, setActiveImage] = useState(product.cover_images?.[0] || product.image_url || 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=800')
+  const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    if (product) {
+      setActiveImage(product.cover_images?.[0] || product.image_url || 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=800')
+    }
+  }, [product])
 
   useEffect(() => {
     async function checkPurchase() {
-      if (user && product.is_paid && product.product_type === 'digital') {
+      if (user && (product.is_paid || Number(product.price) > 0) && product.product_type === 'digital') {
         const result = await hasPurchased(product.id)
         setPurchased(result)
       }
@@ -47,12 +56,23 @@ export function ProductDetail({ product }: { product: Product }) {
 
   useEffect(() => {
     async function fetchReviews() {
-      const { data } = await supabase
-        .from('product_reviews')
-        .select('*')
-        .eq('product_id', product.id)
-        .order('created_at', { ascending: false })
-      setReviews(data || [])
+      try {
+        const q = query(
+          collection(db, 'product_reviews'),
+          where('product_id', '==', product.id),
+          orderBy('created_at', 'desc')
+        )
+        const snapshot = await getDocs(q)
+        const data = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          created_at: doc.data().created_at?.toDate?.().toISOString() || new Date().toISOString()
+        })) as ProductReview[]
+        setReviews(data)
+      } catch (error) {
+        console.error('Error fetching reviews:', error)
+        setReviews([])
+      }
     }
     fetchReviews()
   }, [product.id])
@@ -61,16 +81,22 @@ export function ProductDetail({ product }: { product: Product }) {
     ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
     : 0
 
-  const canAccess = product.product_type === 'digital' && (!product.is_paid || product.is_free || purchased)
+  const canAccess = product.product_type === 'digital' && (product.is_free || Number(product.price) === 0 || purchased)
   const isOutOfStock = product.product_type === 'physical' && product.stock_quantity === 0
 
   const handleAddToCart = () => {
-    if (product.product_type === 'physical') {
-      setShowShippingForm(true)
-      return
+    // Validate variants
+    if (product.variants && product.variants.length > 0) {
+      const missing = product.variants.find(v => !selectedOptions[v.name])
+      if (missing) {
+        toast.error(`Please select a ${missing.name}`)
+        return
+      }
     }
+
+
     for (let i = 0; i < quantity; i++) {
-      addToCart(product, 'product')
+      addToCart(product, 'product', selectedOptions)
     }
     toast.success(`Added ${quantity} item(s) to cart!`)
   }
@@ -80,11 +106,11 @@ export function ProductDetail({ product }: { product: Product }) {
       toast.error('Please fill in all shipping details')
       return
     }
-    
+
     for (let i = 0; i < quantity; i++) {
       addToCart(product, 'product')
     }
-    
+
     localStorage.setItem('shippingDetails', JSON.stringify(shippingDetails))
     toast.success(`Added ${quantity} item(s) to cart with shipping details!`)
     setShowShippingForm(false)
@@ -100,29 +126,38 @@ export function ProductDetail({ product }: { product: Product }) {
       toast.error('Please sign in to leave a review')
       return
     }
-    
-    setSubmitting(true)
-    const { error } = await supabase.from('product_reviews').insert({
-      product_id: product.id,
-      user_id: user.id,
-      user_email: user.email,
-      user_name: user.name || 'Anonymous',
-      rating: reviewRating,
-      comment: reviewComment
-    })
 
-    if (error) {
-      toast.error('Failed to submit review')
-    } else {
+    setSubmitting(true)
+    try {
+      await addDoc(collection(db, 'product_reviews'), {
+        product_id: product.id,
+        user_id: user.id,
+        user_email: user.email,
+        user_name: user.name || 'Anonymous',
+        rating: reviewRating,
+        comment: reviewComment,
+        created_at: Timestamp.now()
+      })
+
       toast.success('Review submitted!')
       setShowReviewForm(false)
       setReviewComment('')
-      const { data } = await supabase
-        .from('product_reviews')
-        .select('*')
-        .eq('product_id', product.id)
-        .order('created_at', { ascending: false })
-      setReviews(data || [])
+
+      const q = query(
+        collection(db, 'product_reviews'),
+        where('product_id', '==', product.id),
+        orderBy('created_at', 'desc')
+      )
+      const snapshot = await getDocs(q)
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        created_at: doc.data().created_at?.toDate?.().toISOString() || new Date().toISOString()
+      })) as ProductReview[]
+      setReviews(data)
+    } catch (error) {
+      console.error('Error submitting review:', error)
+      toast.error('Failed to submit review')
     }
     setSubmitting(false)
   }
@@ -138,19 +173,22 @@ export function ProductDetail({ product }: { product: Product }) {
     }
 
     setSubmitting(true)
-    const { error } = await supabase.from('update_requests').insert({
-      product_id: product.id,
-      user_id: user.id,
-      user_email: user.email,
-      message: updateMessage
-    })
+    try {
+      await addDoc(collection(db, 'update_requests'), {
+        product_id: product.id,
+        user_id: user.id,
+        user_email: user.email,
+        message: updateMessage,
+        status: 'pending',
+        created_at: Timestamp.now()
+      })
 
-    if (error) {
-      toast.error('Failed to submit request')
-    } else {
       toast.success('Update request submitted!')
       setShowUpdateRequestForm(false)
       setUpdateMessage('')
+    } catch (error) {
+      console.error('Error submitting update request:', error)
+      toast.error('Failed to submit request')
     }
     setSubmitting(false)
   }
@@ -193,34 +231,55 @@ export function ProductDetail({ product }: { product: Product }) {
         </Link>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-12 mb-12">
-          <div className="relative aspect-square rounded-2xl overflow-hidden bg-white/5">
-            <Image
-              src={product.image_url || 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=800'}
-              alt={product.title}
-              fill
-              className="object-cover"
-            />
-            <div className="absolute top-4 left-4 px-3 py-1 rounded-full bg-black/50 backdrop-blur-sm text-white text-sm font-medium flex items-center gap-2">
-              {product.product_type === 'digital' ? (
-                <>
-                  <Download size={14} />
-                  Digital Product
-                </>
-              ) : (
-                <>
-                  <Package size={14} />
-                  Physical Product
-                </>
-              )}
+          <div className="space-y-4">
+            <div className="relative aspect-square rounded-2xl overflow-hidden bg-white/5">
+              <Image
+                src={activeImage}
+                alt={product.title}
+                fill
+                className="object-cover"
+              />
+              <div className="absolute top-4 left-4 px-3 py-1 rounded-full bg-black/50 backdrop-blur-sm text-white text-sm font-medium flex items-center gap-2">
+                {product.product_type === 'digital' ? (
+                  <>
+                    <Download size={14} />
+                    Digital Product
+                  </>
+                ) : (
+                  <>
+                    <Package size={14} />
+                    Physical Product
+                  </>
+                )}
+              </div>
             </div>
+            {product.cover_images && product.cover_images.length > 1 && (
+              <div className="grid grid-cols-5 gap-2">
+                {product.cover_images.map((img, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setActiveImage(img)}
+                    className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all ${activeImage === img ? 'border-cyan-500 opacity-100' : 'border-transparent opacity-60 hover:opacity-100'
+                      }`}
+                  >
+                    <Image src={img} alt={`View ${i + 1}`} fill className="object-cover" />
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <div>
             <div className="flex items-center gap-3 mb-4 flex-wrap">
               <span className="px-3 py-1 rounded-full bg-white/5 text-white/70 text-sm">{product.category}</span>
-              {(product.is_free || !product.is_paid) && (
+              {(product.is_free || Number(product.price) === 0) && (
                 <span className="px-3 py-1 rounded-full bg-green-500/20 text-green-400 text-sm font-medium">
                   Free
+                </span>
+              )}
+              {(!product.is_free && Number(product.price) > 0) && (
+                <span className="px-3 py-1 rounded-full bg-violet-500/20 text-violet-400 text-sm font-medium">
+                  Paid
                 </span>
               )}
               {product.product_type === 'digital' && purchased && (
@@ -237,14 +296,14 @@ export function ProductDetail({ product }: { product: Product }) {
             </div>
 
             <h1 className="font-display text-4xl sm:text-5xl text-white mb-4">{product.title}</h1>
-            
+
             {reviews.length > 0 && (
               <div className="flex items-center gap-3 mb-4">
                 {renderStars(Math.round(averageRating))}
                 <span className="text-white/50">({reviews.length} reviews)</span>
               </div>
             )}
-            
+
             {product.description && (
               <p className="text-white/60 text-lg mb-6">{product.description}</p>
             )}
@@ -262,8 +321,32 @@ export function ProductDetail({ product }: { product: Product }) {
             )}
 
             <div className="text-3xl font-bold text-cyan-400 mb-6">
-              {product.is_free || !product.is_paid ? 'Free' : formatCurrency(product.price)}
+              {product.is_free || Number(product.price) === 0 ? 'Free' : formatCurrency(product.price)}
             </div>
+
+            {product.variants && product.variants.length > 0 && (
+              <div className="mb-8 space-y-4">
+                {product.variants.map((variant) => (
+                  <div key={variant.name}>
+                    <span className="block text-white/70 text-sm mb-2">{variant.name}:</span>
+                    <div className="flex flex-wrap gap-2">
+                      {variant.options.map((opt) => (
+                        <button
+                          key={opt}
+                          onClick={() => setSelectedOptions({ ...selectedOptions, [variant.name]: opt })}
+                          className={`px-4 py-2 rounded-lg border text-sm transition-all ${selectedOptions[variant.name] === opt
+                            ? 'bg-white text-black border-white'
+                            : 'bg-white/5 text-white/70 border-white/10 hover:border-white/30'
+                            }`}
+                        >
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {product.product_type === 'physical' && (
               <div className={`mb-6 ${isOutOfStock ? 'text-red-400' : 'text-white/50'}`}>
@@ -271,7 +354,7 @@ export function ProductDetail({ product }: { product: Product }) {
               </div>
             )}
 
-            {product.product_type === 'physical' && !isOutOfStock && product.is_paid && (
+            {product.product_type === 'physical' && !isOutOfStock && Number(product.price) > 0 && (
               <div className="flex items-center gap-4 mb-6">
                 <span className="text-white/70">Quantity:</span>
                 <div className="flex items-center gap-2">
@@ -300,30 +383,20 @@ export function ProductDetail({ product }: { product: Product }) {
                   className="flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-cyan-500 to-fuchsia-500 rounded-full text-white font-semibold hover:opacity-90 transition-all"
                 >
                   <Download size={20} />
-                  Download Now
+                  {(product.is_free || Number(product.price) === 0) ? 'Download Free' : 'Download Now'}
                 </a>
-              ) : product.is_paid && !product.is_free ? (
+              ) : (
                 <button
                   onClick={handleAddToCart}
                   disabled={isOutOfStock}
-                  className={`flex items-center gap-2 px-8 py-4 rounded-full font-semibold transition-all ${
-                    isOutOfStock
-                      ? 'bg-white/10 text-white/50 cursor-not-allowed'
-                      : 'bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:opacity-90'
-                  }`}
+                  className={`flex items-center gap-2 px-8 py-4 rounded-full font-semibold transition-all ${isOutOfStock
+                    ? 'bg-white/10 text-white/50 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:opacity-90'
+                    }`}
                 >
                   <ShoppingCart size={20} />
                   {isOutOfStock ? 'Out of Stock' : 'Add to Cart'}
                 </button>
-              ) : (
-                <a
-                  href={product.download_file_path || '#'}
-                  download
-                  className="flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-cyan-500 to-fuchsia-500 rounded-full text-white font-semibold hover:opacity-90 transition-all"
-                >
-                  <Download size={20} />
-                  Download Free
-                </a>
               )}
               <button
                 onClick={handleShare}

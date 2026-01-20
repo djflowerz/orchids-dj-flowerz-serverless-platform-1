@@ -33,6 +33,9 @@ export interface Mixtape {
   is_featured: boolean
   download_count: number
   created_at: string
+  audio_download_url?: string | null
+  video_download_url?: string | null
+  embed_url?: string | null
 }
 
 export interface Product {
@@ -40,19 +43,37 @@ export interface Product {
   title: string
   description: string | null
   product_type: 'digital' | 'physical'
-  category: string | null
-  image_url: string | null
   price: number
+  status: 'draft' | 'published' | 'archived'
+  cover_images: string[]
+  category: string | null
+  created_at: string
+
+  // Digital Specific
+  version?: string | null
+  download_file_path?: string | null
+  post_payment_message?: string | null
+  supported_os?: string[]
+  changelog?: string | null
+  license_notes?: string | null
+
+  // Physical Specific
+  stock_quantity?: number
+  sku?: string | null
+  delivery_method?: string | null
+  estimated_delivery_time?: string | null
+  weight?: number | null // in kg?
+  dimensions?: string | null // e.g. "10x20x5 cm"
+  variants?: { name: string; options: string[] }[] | null
+
+  // Computed/Legacy
+  image_url?: string | null // Primary image
   is_paid: boolean
   is_free: boolean
-  stock_quantity: number
-  supported_os: string[]
-  version_number: string | null
-  download_file_path: string | null
-  download_password: string | null
-  created_at: string
+  download_password?: string | null
   average_rating?: number
   review_count?: number
+  downloads?: number
 }
 
 export interface MusicPoolTrack {

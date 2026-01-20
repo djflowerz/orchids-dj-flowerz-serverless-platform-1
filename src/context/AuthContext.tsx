@@ -1,10 +1,10 @@
 "use client"
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { auth, db } from '@/lib/firebase'
-import { 
-  signInWithEmailAndPassword, 
+import {
+  signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
   onAuthStateChanged,
@@ -18,6 +18,9 @@ import {
   ConfirmationResult
 } from 'firebase/auth'
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore'
+import { toast } from 'sonner'
+
+const INACTIVITY_TIMEOUT = 15 * 60 * 1000 // 15 minutes
 
 const ADMIN_EMAIL = 'ianmuriithiflowerz@gmail.com'
 
@@ -29,6 +32,7 @@ interface User {
   email_verified: boolean
   subscription_status: 'none' | 'active' | 'expired' | 'cancelled'
   subscription_tier: 'basic' | 'pro' | 'unlimited' | null
+  subscription_expires_at: string | null
   account_status: 'unverified' | 'active' | 'suspended'
   telegram_user_id: string | null
   telegram_username: string | null
@@ -58,7 +62,7 @@ async function getUserProfile(firebaseUser: FirebaseUser): Promise<User | null> 
   try {
     const userDocRef = doc(db, 'users', firebaseUser.uid)
     const userDoc = await getDoc(userDocRef)
-    
+
     if (userDoc.exists()) {
       const userData = userDoc.data()
       return {
@@ -69,13 +73,14 @@ async function getUserProfile(firebaseUser: FirebaseUser): Promise<User | null> 
         email_verified: firebaseUser.emailVerified,
         subscription_status: userData.subscription_status || 'none',
         subscription_tier: userData.subscription_tier || null,
+        subscription_expires_at: userData.subscription_expires_at || null,
         account_status: userData.account_status || 'active',
         telegram_user_id: userData.telegram_user_id || null,
         telegram_username: userData.telegram_username || null,
         created_at: userData.created_at || new Date().toISOString()
       }
     }
-    
+
     const newUser: Omit<User, 'id'> = {
       name: firebaseUser.displayName || '',
       email: firebaseUser.email || '',
@@ -83,12 +88,13 @@ async function getUserProfile(firebaseUser: FirebaseUser): Promise<User | null> 
       email_verified: firebaseUser.emailVerified,
       subscription_status: 'none',
       subscription_tier: null,
+      subscription_expires_at: null,
       account_status: 'active',
       telegram_user_id: null,
       telegram_username: null,
       created_at: new Date().toISOString()
     }
-    
+
     await setDoc(userDocRef, newUser)
     return { id: firebaseUser.uid, ...newUser }
   } catch (error) {
@@ -140,20 +146,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(true)
       const userCredential = await signInWithEmailAndPassword(auth, email, password)
       const userProfile = await getUserProfile(userCredential.user)
-      
+
       if (userProfile) {
         setUser(userProfile)
-        
+
         const userDocRef = doc(db, 'users', userCredential.user.uid)
         await updateDoc(userDocRef, { last_login: new Date().toISOString() })
-        
+
         setLoading(false)
-        return { 
-          error: null, 
-          redirectTo: userProfile.role === 'admin' ? '/admin' : '/dashboard' 
+        return {
+          error: null,
+          redirectTo: userProfile.role === 'admin' ? '/admin' : '/dashboard'
         }
       }
-      
+
       setLoading(false)
       return { error: 'Failed to get user profile' }
     } catch (err: unknown) {
@@ -172,7 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signUp(email: string, password: string, name: string) {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password)
-      
+
       const userDocRef = doc(db, 'users', userCredential.user.uid)
       await setDoc(userDocRef, {
         name,
@@ -181,6 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email_verified: false,
         subscription_status: 'none',
         subscription_tier: null,
+        subscription_expires_at: null,
         account_status: 'active',
         telegram_user_id: null,
         telegram_username: null,
@@ -205,10 +212,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await firebaseSignOut(auth)
       setUser(null)
       router.push('/')
+      toast.info('Signed out successfully')
     } catch (error) {
       console.error('Logout error:', error)
     }
   }
+
+  useEffect(() => {
+    if (!user) return
+
+    let inactivityTimer: NodeJS.Timeout
+
+    const logoutUser = async () => {
+      await firebaseSignOut(auth)
+      setUser(null)
+      router.push('/login')
+      toast.warning('Session timed out due to inactivity')
+    }
+
+    const resetTimer = () => {
+      if (inactivityTimer) clearTimeout(inactivityTimer)
+      inactivityTimer = setTimeout(logoutUser, INACTIVITY_TIMEOUT)
+    }
+
+    resetTimer()
+
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart']
+    const handleActivity = () => resetTimer()
+
+    events.forEach(event => window.addEventListener(event, handleActivity))
+
+    return () => {
+      if (inactivityTimer) clearTimeout(inactivityTimer)
+      events.forEach(event => window.removeEventListener(event, handleActivity))
+    }
+  }, [user, router])
 
   async function refreshUser() {
     const firebaseUser = auth.currentUser
@@ -270,18 +308,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(true)
       const userCredential = await confirmationResult.confirm(code)
       const userProfile = await getUserProfile(userCredential.user)
-      
+
       if (userProfile) {
         setUser(userProfile)
         const userDocRef = doc(db, 'users', userCredential.user.uid)
         await updateDoc(userDocRef, { last_login: new Date().toISOString() })
         setLoading(false)
-        return { 
-          error: null, 
-          redirectTo: userProfile.role === 'admin' ? '/admin' : '/dashboard' 
+        return {
+          error: null,
+          redirectTo: userProfile.role === 'admin' ? '/admin' : '/dashboard'
         }
       }
-      
+
       setLoading(false)
       return { error: 'Failed to get user profile' }
     } catch (err: unknown) {
@@ -305,10 +343,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) return requiredTier === 'free'
     if (user.role === 'admin') return true
     if (user.subscription_status !== 'active') return requiredTier === 'free'
-    
+
     const userTierLevel = tierHierarchy[user.subscription_tier || 'free'] || 0
     const requiredLevel = tierHierarchy[requiredTier] || 0
-    
+
     return userTierLevel >= requiredLevel
   }
 

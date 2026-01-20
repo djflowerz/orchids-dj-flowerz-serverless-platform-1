@@ -4,7 +4,8 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { Mail, ArrowRight, ArrowLeft, CheckCircle } from 'lucide-react'
 import { toast } from 'sonner'
-import { supabase } from '@/lib/supabase'
+import { auth } from '@/lib/firebase'
+import { sendPasswordResetEmail } from 'firebase/auth'
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('')
@@ -15,18 +16,14 @@ export default function ForgotPasswordPage() {
     e.preventDefault()
     setLoading(true)
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    })
-
-    if (error) {
+    try {
+      await sendPasswordResetEmail(auth, email)
+      setSent(true)
+    } catch (error: any) {
       toast.error(error.message)
+    } finally {
       setLoading(false)
-      return
     }
-
-    setSent(true)
-    setLoading(false)
   }
 
   if (sent) {
@@ -38,7 +35,7 @@ export default function ForgotPasswordPage() {
           </div>
           <h1 className="font-display text-4xl text-white mb-4">CHECK YOUR EMAIL</h1>
           <p className="text-white/60 mb-8">
-            We&apos;ve sent a password reset link to <span className="text-white font-medium">{email}</span>. 
+            We&apos;ve sent a password reset link to <span className="text-white font-medium">{email}</span>.
             Click the link in the email to reset your password.
           </p>
           <p className="text-white/40 text-sm mb-8">
@@ -108,8 +105,8 @@ export default function ForgotPasswordPage() {
           </button>
         </form>
 
-        <Link 
-          href="/login" 
+        <Link
+          href="/login"
           className="flex items-center justify-center gap-2 text-white/50 hover:text-white/70 mt-6 transition-colors"
         >
           <ArrowLeft size={18} />

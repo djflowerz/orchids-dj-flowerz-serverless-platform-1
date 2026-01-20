@@ -2,10 +2,12 @@
 
 import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { db } from '@/lib/firebase'
+import { collection, query, where, getDocs, doc, getDoc, limit } from 'firebase/firestore'
 import { CheckCircle, Download, Copy, Key, Package, ArrowRight, Send } from 'lucide-react'
 import Link from 'next/link'
-import { toast } from 'sonner'
+import { toast } from 'sonner' // Ensure this imports correctly if it's used
+// Note: toast was imported but unused in original file for copy action, used here for consistency
 
 interface PurchaseDetails {
   product_title: string
@@ -45,31 +47,38 @@ function SuccessContent() {
         return
       }
 
-      const { data: payment } = await supabase
-        .from('payments')
-        .select('*, item_id, amount, payment_type')
-        .eq('paystack_reference', reference)
-        .single()
+      try {
+        const q = query(
+          collection(db, 'payments'),
+          where('paystack_reference', '==', reference),
+          limit(1)
+        )
+        const snapshot = await getDocs(q)
 
-      if (payment && payment.item_id) {
-        const { data: product } = await supabase
-          .from('products')
-          .select('title, product_type, download_file_path, download_password')
-          .eq('id', payment.item_id)
-          .single()
+        if (!snapshot.empty) {
+          const payment = snapshot.docs[0].data()
 
-        if (product) {
-          setDetails({
-            product_title: product.title,
-            product_type: product.product_type,
-            download_url: product.download_file_path,
-            download_password: product.download_password,
-            payment_amount: payment.amount || 0,
-            is_subscription: false
-          })
+          if (payment && payment.item_id) {
+            const productDoc = await getDoc(doc(db, 'products', payment.item_id))
+
+            if (productDoc.exists()) {
+              const product = productDoc.data()
+              setDetails({
+                product_title: product.title,
+                product_type: product.product_type,
+                download_url: product.download_file_path,
+                download_password: product.download_password,
+                payment_amount: payment.amount || 0,
+                is_subscription: false
+              })
+            }
+          }
         }
+      } catch (error) {
+        console.error('Error fetching purchase details:', error)
+      } finally {
+        setLoading(false)
       }
-      setLoading(false)
     }
 
     fetchPurchaseDetails()
@@ -110,7 +119,7 @@ function SuccessContent() {
                 <Package size={24} className="text-fuchsia-400" />
                 <h2 className="text-white font-semibold text-lg">{details.product_title}</h2>
               </div>
-              
+
               {details.payment_amount > 0 && (
                 <p className="text-white/50 text-sm mb-4">
                   Amount paid: <span className="text-white font-semibold">KSh {(details.payment_amount / 100).toLocaleString()}</span>

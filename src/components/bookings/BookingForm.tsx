@@ -2,9 +2,12 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Calendar, Clock, MapPin, MessageSquare, Send, Loader2, Phone, Mail, User, DollarSign, Heart } from 'lucide-react'
+import { storage } from '@/lib/firebase'
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
+import { Calendar, Clock, MapPin, MessageSquare, Send, Loader2, Phone, Mail, User, DollarSign, Heart, Paperclip, X, Upload } from 'lucide-react'
 
 const EVENT_TYPES = [
+  { value: 'birthday', label: 'Birthday' },
   { value: 'wedding', label: 'Wedding' },
   { value: 'club', label: 'Club' },
   { value: 'corporate', label: 'Corporate' },
@@ -14,53 +17,79 @@ const EVENT_TYPES = [
 
 export function BookingForm() {
   const [loading, setLoading] = useState(false)
-    const [formData, setFormData] = useState({
-      customer_name: '',
-      email: '',
-      phone: '',
-      event_type: 'wedding',
-      event_date: '',
-      event_time: '',
-      location: '',
-      notes: '',
-      estimated_budget: '',
-      tipjar_amount: '',
-    })
+  const [files, setFiles] = useState<File[]>([])
+  const [formData, setFormData] = useState({
+    customer_name: '',
+    email: '',
+    phone: '',
+    event_type: 'birthday',
+    event_date: '',
+    event_time: '',
+    location: '',
+    notes: '',
+    estimated_budget: '',
+    tipjar_amount: '',
+  })
 
-    const handleSubmit = async (e: React.FormEvent) => {
-      e.preventDefault()
-      setLoading(true)
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setFiles(prev => [...prev, ...Array.from(e.target.files!)])
+    }
+  }
 
-      try {
-        const response = await fetch('/api/bookings/create', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...formData,
-            estimated_budget: formData.estimated_budget ? parseFloat(formData.estimated_budget) : null,
-            tipjar_amount: formData.tipjar_amount ? parseFloat(formData.tipjar_amount) : 0,
-          })
+  const removeFile = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+
+    try {
+      let fileUrls: string[] = []
+
+      // Upload files if any
+      if (files.length > 0) {
+        toast.info('Uploading attachments...')
+        const uploadPromises = files.map(async (file) => {
+          const storageRef = ref(storage, `bookings/${Date.now()}_${file.name}`)
+          await uploadBytes(storageRef, file)
+          return getDownloadURL(storageRef)
         })
+        fileUrls = await Promise.all(uploadPromises)
+      }
 
-        const data = await response.json()
-
-        if (!data.success) {
-          throw new Error(data.error || 'Failed to submit booking')
-        }
-
-        toast.success('Booking request sent successfully! We will contact you soon.')
-        setFormData({
-          customer_name: '',
-          email: '',
-          phone: '',
-          event_type: 'wedding',
-          event_date: '',
-          event_time: '',
-          location: '',
-          notes: '',
-          estimated_budget: '',
-          tipjar_amount: '',
+      const response = await fetch('/api/bookings/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...formData,
+          estimated_budget: formData.estimated_budget ? parseFloat(formData.estimated_budget) : null,
+          tipjar_amount: formData.tipjar_amount ? parseFloat(formData.tipjar_amount) : 0,
+          attachments: fileUrls
         })
+      })
+
+      const data = await response.json()
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to submit booking')
+      }
+
+      toast.success('Booking request sent successfully! We will contact you soon.')
+      setFormData({
+        customer_name: '',
+        email: '',
+        phone: '',
+        event_type: 'birthday',
+        event_date: '',
+        event_time: '',
+        location: '',
+        notes: '',
+        estimated_budget: '',
+        tipjar_amount: '',
+      })
+      setFiles([])
     } catch (error) {
       console.error('Booking error:', error)
       toast.error('Failed to send booking request. Please try again.')
@@ -77,16 +106,16 @@ export function BookingForm() {
             <User size={14} />
             Full Name *
           </label>
-            <input
-              required
-              type="text"
-              value={formData.customer_name}
-              onChange={(e) => setFormData({ ...formData, customer_name: e.target.value })}
-              placeholder="John Doe"
-              className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white focus:border-fuchsia-500/50 outline-none transition-all"
-            />
+          <input
+            required
+            type="text"
+            value={formData.customer_name}
+            onChange={(e) => setFormData({ ...formData, customer_name: e.target.value })}
+            placeholder="John Doe"
+            className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white focus:border-fuchsia-500/50 outline-none transition-all"
+          />
         </div>
-        
+
         <div className="space-y-2">
           <label className="text-sm font-medium text-white/70 flex items-center gap-2">
             <Mail size={14} />
@@ -101,7 +130,7 @@ export function BookingForm() {
             className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white focus:border-fuchsia-500/50 outline-none transition-all"
           />
         </div>
-        
+
         <div className="space-y-2">
           <label className="text-sm font-medium text-white/70 flex items-center gap-2">
             <Phone size={14} />
@@ -116,7 +145,7 @@ export function BookingForm() {
             className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white focus:border-fuchsia-500/50 outline-none transition-all"
           />
         </div>
-        
+
         <div className="space-y-2">
           <label className="text-sm font-medium text-white/70">Event Type *</label>
           <select
@@ -132,7 +161,7 @@ export function BookingForm() {
             ))}
           </select>
         </div>
-        
+
         <div className="space-y-2">
           <label className="text-sm font-medium text-white/70 flex items-center gap-2">
             <Calendar size={14} />
@@ -146,7 +175,7 @@ export function BookingForm() {
             className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white focus:border-fuchsia-500/50 outline-none transition-all"
           />
         </div>
-        
+
         <div className="space-y-2">
           <label className="text-sm font-medium text-white/70 flex items-center gap-2">
             <Clock size={14} />
@@ -160,7 +189,7 @@ export function BookingForm() {
             className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white focus:border-fuchsia-500/50 outline-none transition-all"
           />
         </div>
-        
+
         <div className="space-y-2 md:col-span-2">
           <label className="text-sm font-medium text-white/70 flex items-center gap-2">
             <MapPin size={14} />
@@ -175,7 +204,7 @@ export function BookingForm() {
             className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white focus:border-fuchsia-500/50 outline-none transition-all"
           />
         </div>
-        
+
         <div className="space-y-2 md:col-span-2">
           <label className="text-sm font-medium text-white/70 flex items-center gap-2">
             <MessageSquare size={14} />
@@ -189,7 +218,49 @@ export function BookingForm() {
             className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white focus:border-fuchsia-500/50 outline-none transition-all resize-none"
           />
         </div>
-        
+
+        <div className="space-y-2 md:col-span-2">
+          <label className="text-sm font-medium text-white/70 flex items-center gap-2">
+            <Paperclip size={14} />
+            Attachments (Event plans, etc.)
+          </label>
+          <div className="flex flex-col gap-3">
+            <div className="relative">
+              <input
+                type="file"
+                multiple
+                onChange={handleFileChange}
+                className="hidden"
+                id="file-upload"
+              />
+              <label
+                htmlFor="file-upload"
+                className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white/70 hover:text-white hover:bg-white/10 cursor-pointer transition-all border-dashed"
+              >
+                <Upload size={16} />
+                <span>{files.length > 0 ? 'Add more files' : 'Click to upload files'}</span>
+              </label>
+            </div>
+
+            {files.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {files.map((file, i) => (
+                  <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-fuchsia-500/10 text-fuchsia-400 text-sm border border-fuchsia-500/20">
+                    <span className="truncate max-w-[200px]">{file.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeFile(i)}
+                      className="p-0.5 hover:bg-fuchsia-500/20 rounded-full"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
         <div className="space-y-2">
           <label className="text-sm font-medium text-white/70 flex items-center gap-2">
             <DollarSign size={14} />
@@ -204,7 +275,7 @@ export function BookingForm() {
             className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white focus:border-fuchsia-500/50 outline-none transition-all"
           />
         </div>
-        
+
         <div className="space-y-2">
           <label className="text-sm font-medium text-white/70 flex items-center gap-2">
             <Heart size={14} className="text-pink-400" />

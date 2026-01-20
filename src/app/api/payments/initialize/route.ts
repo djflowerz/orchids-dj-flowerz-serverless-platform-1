@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminDb } from '@/lib/firebase-admin'
+import { FieldValue } from 'firebase-admin/firestore'
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,10 +16,10 @@ export async function POST(request: NextRequest) {
       payment_ref: reference,
       payment_type: paymentType || 'product',
       status: 'pending',
-      metadata: { 
-        items: items || null 
+      metadata: {
+        items: items || null
       },
-      createdAt: new Date().toISOString()
+      createdAt: FieldValue.serverTimestamp()
     })
 
     return NextResponse.json({

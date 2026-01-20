@@ -4,15 +4,18 @@ import { useAuth } from '@/context/AuthContext'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState, useCallback, Suspense, useRef } from 'react'
 import { db, storage } from '@/lib/firebase'
-import { collection, getDocs, query, orderBy, limit, doc, updateDoc, deleteDoc, addDoc, setDoc, getDoc } from 'firebase/firestore'
+import { collection, getDocs, query, orderBy, limit, doc, updateDoc, deleteDoc, addDoc, setDoc, getDoc, onSnapshot } from 'firebase/firestore'
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
-import { 
+import {
   LayoutDashboard, Users, Package, Music, Crown, CreditCard, Calendar,
   DollarSign, Heart, Send, FileText, Settings, Search, Bell, RefreshCw,
   LogOut, Home, Plus, Edit, Trash2, Eye, Download,
   ExternalLink, X, AlertCircle, TrendingUp, ShoppingBag,
-  Upload, Play, Shield, Activity, BarChart3, Save, Key, Hash
+  Upload, Play, Shield, Activity, BarChart3, Save, Key, Hash, Check, Truck,
+  ChevronLeft, ChevronRight, ChevronDown, Filter
 } from 'lucide-react'
+import { Product } from '@/lib/types'
+import { toast } from 'sonner'
 
 interface DashboardStats {
   totalRevenue: number
@@ -39,20 +42,7 @@ interface UserData {
   last_login?: string
 }
 
-interface Product {
-  id: string
-  title: string
-  description: string
-  price: number
-  type: 'digital' | 'physical'
-  version?: string
-  stock?: number
-  sku?: string
-  deliveryStatus?: string
-  status: 'active' | 'inactive'
-  downloads: number
-  created_at: string
-}
+
 
 interface Mixtape {
   id: string
@@ -150,6 +140,16 @@ interface TelegramChannel {
   tier: 'basic' | 'pro' | 'unlimited'
 }
 
+interface Plan {
+  id: string
+  name: string
+  price: number
+  durationDays: number
+  channels: string[]
+  isActive: boolean
+  createdAt: string
+}
+
 interface SiteSettings {
   maintenanceMode: boolean
   paystackPublicKey: string
@@ -161,14 +161,14 @@ interface SiteSettings {
   autoSyncEnabled: boolean
 }
 
-type TabType = 'dashboard' | 'users' | 'products' | 'mixtapes' | 'music-pool' | 'subscriptions' | 'bookings' | 'payments' | 'tips' | 'telegram' | 'reports' | 'settings'
+type TabType = 'dashboard' | 'users' | 'products' | 'mixtapes' | 'music-pool' | 'subscriptions' | 'bookings' | 'payments' | 'tips' | 'telegram' | 'reports' | 'settings' | 'shipping'
 
 function AdminContent() {
   const { user, loading, isAdmin, signOut } = useAuth()
   const router = useRouter()
   const searchParams = useSearchParams()
   const tabParam = searchParams.get('tab') as TabType | null
-  
+
   const [activeTab, setActiveTab] = useState<TabType>(tabParam || 'dashboard')
   const [stats, setStats] = useState<DashboardStats>({
     totalRevenue: 0,
@@ -189,6 +189,7 @@ function AdminContent() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [tips, setTips] = useState<Tip[]>([])
   const [orders, setOrders] = useState<Order[]>([])
+  const [plans, setPlans] = useState<Plan[]>([])
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -197,7 +198,9 @@ function AdminContent() {
   const [showProductModal, setShowProductModal] = useState(false)
   const [showMixtapeModal, setShowMixtapeModal] = useState(false)
   const [showTrackModal, setShowTrackModal] = useState(false)
+  const [showPlanModal, setShowPlanModal] = useState(false)
   const [editingItem, setEditingItem] = useState<Product | Mixtape | MusicPoolTrack | null>(null)
+  const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
 
   const [siteSettings, setSiteSettings] = useState<SiteSettings>({
     maintenanceMode: false,
@@ -223,76 +226,89 @@ function AdminContent() {
     }
   }, [user, loading, isAdmin, router])
 
-  const fetchAllData = useCallback(async () => {
-    setIsRefreshing(true)
-    try {
-      const [
-        usersSnap, productsSnap, mixtapesSnap, musicPoolSnap,
-        subscriptionsSnap, bookingsSnap, transactionsSnap, tipsSnap, ordersSnap, settingsSnap
-      ] = await Promise.all([
-        getDocs(query(collection(db, 'users'), orderBy('created_at', 'desc'))),
-        getDocs(query(collection(db, 'products'), orderBy('created_at', 'desc'))),
-        getDocs(query(collection(db, 'mixtapes'), orderBy('created_at', 'desc'))),
-        getDocs(query(collection(db, 'music_pool'), orderBy('created_at', 'desc'))),
-        getDocs(query(collection(db, 'subscriptions'), orderBy('created_at', 'desc'))),
-        getDocs(query(collection(db, 'bookings'), orderBy('created_at', 'desc'))),
-        getDocs(query(collection(db, 'transactions'), orderBy('created_at', 'desc'), limit(200))),
-        getDocs(query(collection(db, 'tips'), orderBy('created_at', 'desc'))),
-        getDocs(query(collection(db, 'orders'), orderBy('created_at', 'desc'))),
-        getDoc(doc(db, 'settings', 'site'))
-      ])
+  // Real-time data listeners
+  useEffect(() => {
+    if (!isAdmin) return
 
-      const usersData = usersSnap.docs.map(d => ({ id: d.id, ...d.data() } as UserData))
-      const productsData = productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Product))
-      const mixtapesData = mixtapesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Mixtape))
-      const musicPoolData = musicPoolSnap.docs.map(d => ({ id: d.id, ...d.data() } as MusicPoolTrack))
-      const subscriptionsData = subscriptionsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Subscription))
-      const bookingsData = bookingsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Booking))
-      const transactionsData = transactionsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Transaction))
-      const tipsData = tipsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Tip))
-      const ordersData = ordersSnap.docs.map(d => ({ id: d.id, ...d.data() } as Order))
+    const unsubUsers = onSnapshot(query(collection(db, 'users'), orderBy('created_at', 'desc')), (snap) => {
+      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as UserData)))
+    })
 
-      if (settingsSnap.exists()) {
-        setSiteSettings({ ...siteSettings, ...settingsSnap.data() as SiteSettings })
+    const unsubProducts = onSnapshot(query(collection(db, 'products'), orderBy('created_at', 'desc')), (snap) => {
+      setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Product)))
+    })
+
+    const unsubMixtapes = onSnapshot(query(collection(db, 'mixtapes'), orderBy('created_at', 'desc')), (snap) => {
+      setMixtapes(snap.docs.map(d => ({ id: d.id, ...d.data() } as Mixtape)))
+    })
+
+    const unsubMusicPool = onSnapshot(query(collection(db, 'music_pool'), orderBy('created_at', 'desc')), (snap) => {
+      setMusicPool(snap.docs.map(d => ({ id: d.id, ...d.data() } as MusicPoolTrack)))
+    })
+
+    const unsubSubs = onSnapshot(query(collection(db, 'subscriptions'), orderBy('created_at', 'desc')), (snap) => {
+      setSubscriptions(snap.docs.map(d => ({ id: d.id, ...d.data() } as Subscription)))
+    })
+
+    const unsubBookings = onSnapshot(query(collection(db, 'bookings'), orderBy('created_at', 'desc')), (snap) => {
+      setBookings(snap.docs.map(d => ({ id: d.id, ...d.data() } as Booking)))
+    })
+
+    const unsubTrans = onSnapshot(query(collection(db, 'transactions'), orderBy('created_at', 'desc')), (snap) => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Transaction))
+      setTransactions(data)
+
+      // Derive tips from transactions
+      setTips(data.filter(t => t.type === 'tip').map(t => ({
+        id: t.id,
+        donor_name: 'Anonymous',
+        donor_email: t.user_email,
+        amount: t.amount,
+        message: t.status === 'completed' ? 'Tip' : 'Pending',
+        source: t.payment_method,
+        created_at: t.created_at
+      })))
+    }, (error) => {
+      console.error("Transactions snapshot error:", error)
+    })
+
+    const unsubOrders = onSnapshot(query(collection(db, 'orders'), orderBy('created_at', 'desc')), (snap) => {
+      setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() } as Order)))
+    })
+
+    const unsubPlans = onSnapshot(query(collection(db, 'plans'), orderBy('createdAt', 'desc')), (snap) => {
+      setPlans(snap.docs.map(d => ({ id: d.id, ...d.data() } as Plan)))
+    })
+
+    const unsubSettings = onSnapshot(doc(db, 'settings', 'site'), (snap) => {
+      if (snap.exists()) {
+        setSiteSettings(prev => ({ ...prev, ...snap.data() as SiteSettings }))
       }
+    })
 
-      setUsers(usersData)
-      setProducts(productsData)
-      setMixtapes(mixtapesData)
-      setMusicPool(musicPoolData)
-      setSubscriptions(subscriptionsData)
-      setBookings(bookingsData)
-      setTransactions(transactionsData)
-      setTips(tipsData)
-      setOrders(ordersData)
-
-      const activeSubscribers = subscriptionsData.filter(s => s.status === 'active').length
-      const totalRevenue = transactionsData.filter(t => t.status === 'completed').reduce((sum, t) => sum + (t.amount || 0), 0)
-      const totalTipsAmount = tipsData.reduce((sum, t) => sum + (t.amount || 0), 0)
-      const pendingOrders = ordersData.filter(o => o.status === 'pending' || o.status === 'processing').length
-
-      setStats({
-        totalRevenue,
-        totalUsers: usersData.length,
-        totalProducts: productsData.length,
-        totalMixtapes: mixtapesData.length,
-        activeSubscribers,
-        totalBookings: bookingsData.length,
-        totalTips: totalTipsAmount,
-        pendingOrders
-      })
-    } catch (error) {
-      console.error('Error fetching data:', error)
-    } finally {
-      setIsRefreshing(false)
+    return () => {
+      unsubUsers(); unsubProducts(); unsubMixtapes(); unsubMusicPool(); unsubPlans();
+      unsubSubs(); unsubBookings(); unsubTrans(); unsubOrders(); unsubSettings();
     }
-  }, [])
+  }, [isAdmin])
 
   useEffect(() => {
-    if (isAdmin) {
-      fetchAllData()
-    }
-  }, [isAdmin, fetchAllData])
+    const activeSubscribers = subscriptions.filter(s => s.status === 'active').length
+    const totalRevenue = transactions.filter(t => t.status === 'success' || t.status === 'completed').reduce((sum, t) => sum + (t.amount || 0), 0)
+    const totalTipsAmount = tips.reduce((sum, t) => sum + (t.amount || 0), 0)
+    const pendingOrders = orders.filter(o => o.status === 'pending' || o.status === 'processing').length
+
+    setStats({
+      totalRevenue,
+      totalUsers: users.length,
+      totalProducts: products.length,
+      totalMixtapes: mixtapes.length,
+      activeSubscribers,
+      totalBookings: bookings.length,
+      totalTips: totalTipsAmount,
+      pendingOrders
+    })
+  }, [users, products, mixtapes, subscriptions, bookings, transactions, tips, orders])
 
   const saveSiteSettings = async (newSettings: Partial<SiteSettings>) => {
     try {
@@ -317,6 +333,7 @@ function AdminContent() {
     { id: 'telegram' as TabType, label: 'Telegram', icon: Send },
     { id: 'reports' as TabType, label: 'Reports', icon: FileText },
     { id: 'settings' as TabType, label: 'Settings', icon: Settings },
+    { id: 'shipping' as TabType, label: 'Shipping', icon: Truck },
   ]
 
   const formatCurrency = (amount: number) => new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(amount)
@@ -330,6 +347,9 @@ function AdminContent() {
       completed: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
       confirmed: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
       active: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+      published: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+      draft: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+      archived: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
       pending: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
       processing: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
       cancelled: 'bg-red-500/20 text-red-400 border-red-500/30',
@@ -397,6 +417,40 @@ function AdminContent() {
     }
   }
 
+  const handleDeletePlan = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this plan?')) return
+    try {
+      await deleteDoc(doc(db, 'plans', id))
+      setPlans(plans.filter(p => p.id !== id))
+      toast.success('Plan deleted')
+    } catch (error) {
+      console.error('Error deleting plan:', error)
+      toast.error('Failed to delete plan')
+    }
+  }
+
+  const handleSavePlan = async (data: any) => {
+    try {
+      if (editingPlan) {
+        await updateDoc(doc(db, 'plans', editingPlan.id), data)
+        setPlans(plans.map(p => p.id === editingPlan.id ? { ...p, ...data } : p))
+        toast.success('Plan updated')
+      } else {
+        const docRef = await addDoc(collection(db, 'plans'), {
+          ...data,
+          createdAt: new Date().toISOString()
+        })
+        setPlans([...plans, { id: docRef.id, ...data, createdAt: new Date().toISOString() } as Plan])
+        toast.success('Plan created')
+      }
+      setShowPlanModal(false)
+      setEditingPlan(null)
+    } catch (error: any) {
+      console.error(error)
+      toast.error(error.message || 'Failed to save plan')
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
@@ -434,11 +488,10 @@ function AdminContent() {
             <button
               key={tab.id}
               onClick={() => { setActiveTab(tab.id); setSidebarOpen(false) }}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all ${
-                activeTab === tab.id 
-                  ? 'bg-violet-500/20 text-violet-400 border border-violet-500/30' 
-                  : 'text-white/60 hover:bg-white/5 hover:text-white border border-transparent'
-              }`}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all ${activeTab === tab.id
+                ? 'bg-violet-500/20 text-violet-400 border border-violet-500/30'
+                : 'text-white/60 hover:bg-white/5 hover:text-white border border-transparent'
+                }`}
             >
               <tab.icon size={18} />
               <span className="font-medium text-sm">{tab.label}</span>
@@ -481,13 +534,7 @@ function AdminContent() {
                   className="pl-9 pr-4 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-violet-500/50 w-64"
                 />
               </div>
-              <button
-                onClick={fetchAllData}
-                disabled={isRefreshing}
-                className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:bg-white/10 hover:text-white transition-all disabled:opacity-50"
-              >
-                <RefreshCw size={18} className={isRefreshing ? 'animate-spin' : ''} />
-              </button>
+
               <button className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:bg-white/10 hover:text-white transition-all relative">
                 <Bell size={18} />
                 {stats.pendingOrders > 0 && (
@@ -503,9 +550,9 @@ function AdminContent() {
 
         <div className="p-6">
           {activeTab === 'dashboard' && (
-            <DashboardTab 
-              stats={stats} 
-              bookings={bookings} 
+            <DashboardTab
+              stats={stats}
+              bookings={bookings}
               transactions={transactions}
               formatCurrency={formatCurrency}
               formatDate={formatDate}
@@ -516,7 +563,7 @@ function AdminContent() {
           )}
 
           {activeTab === 'users' && (
-            <UsersTab 
+            <UsersTab
               users={users}
               searchQuery={searchQuery}
               formatDate={formatDate}
@@ -527,7 +574,7 @@ function AdminContent() {
           )}
 
           {activeTab === 'products' && (
-            <ProductsTab 
+            <ProductsTab
               products={products}
               searchQuery={searchQuery}
               formatCurrency={formatCurrency}
@@ -540,7 +587,7 @@ function AdminContent() {
           )}
 
           {activeTab === 'mixtapes' && (
-            <MixtapesTab 
+            <MixtapesTab
               mixtapes={mixtapes}
               searchQuery={searchQuery}
               formatCurrency={formatCurrency}
@@ -553,18 +600,23 @@ function AdminContent() {
           )}
 
           {activeTab === 'music-pool' && (
-            <MusicPoolTab 
+            <MusicPoolTab
               tracks={musicPool}
               subscriptions={subscriptions}
               searchQuery={searchQuery}
+              searchQuery={searchQuery}
+              plans={plans}
               onDelete={handleDeleteTrack}
               onAdd={() => { setEditingItem(null); setShowTrackModal(true) }}
               onEdit={(t) => { setEditingItem(t); setShowTrackModal(true) }}
+              onAddPlan={() => { setEditingPlan(null); setShowPlanModal(true) }}
+              onEditPlan={(p) => { setEditingPlan(p); setShowPlanModal(true) }}
+              onDeletePlan={handleDeletePlan}
             />
           )}
 
           {activeTab === 'subscriptions' && (
-            <SubscriptionsTab 
+            <SubscriptionsTab
               subscriptions={subscriptions}
               searchQuery={searchQuery}
               formatDate={formatDate}
@@ -573,7 +625,7 @@ function AdminContent() {
           )}
 
           {activeTab === 'bookings' && (
-            <BookingsTab 
+            <BookingsTab
               bookings={bookings}
               searchQuery={searchQuery}
               formatCurrency={formatCurrency}
@@ -584,7 +636,7 @@ function AdminContent() {
           )}
 
           {activeTab === 'payments' && (
-            <PaymentsTab 
+            <PaymentsTab
               transactions={transactions}
               stats={stats}
               searchQuery={searchQuery}
@@ -595,7 +647,7 @@ function AdminContent() {
           )}
 
           {activeTab === 'tips' && (
-            <TipsTab 
+            <TipsTab
               tips={tips}
               formatCurrency={formatCurrency}
               formatDate={formatDate}
@@ -603,7 +655,7 @@ function AdminContent() {
           )}
 
           {activeTab === 'telegram' && (
-            <TelegramTab 
+            <TelegramTab
               subscriptions={subscriptions}
               users={users}
               settings={siteSettings}
@@ -614,7 +666,7 @@ function AdminContent() {
           )}
 
           {activeTab === 'reports' && (
-            <ReportsTab 
+            <ReportsTab
               users={users}
               transactions={transactions}
               bookings={bookings}
@@ -622,7 +674,7 @@ function AdminContent() {
           )}
 
           {activeTab === 'settings' && (
-            <SettingsTab 
+            <SettingsTab
               settings={siteSettings}
               onToggleMaintenance={() => saveSiteSettings({ maintenanceMode: !siteSettings.maintenanceMode })}
               onConfigurePaystack={() => setShowPaymentConfigModal('paystack')}
@@ -630,44 +682,76 @@ function AdminContent() {
               onEditEmailTemplate={(template) => setShowEmailTemplateModal(template)}
             />
           )}
+
+          {activeTab === 'shipping' && (
+            <ShippingTab
+              orders={orders}
+              formatDate={formatDate}
+              formatCurrency={formatCurrency}
+              getStatusBadge={getStatusBadge}
+            />
+          )}
         </div>
       </main>
 
       {showProductModal && (
-        <ProductModal 
+        <ProductModal
           product={editingItem as Product | null}
           onClose={() => { setShowProductModal(false); setEditingItem(null) }}
-          onSave={async (data) => {
+          onSave={async (data, imageFiles) => {
             try {
+              let cover_images = data.cover_images || []
+
+              if (imageFiles && imageFiles.length > 0) {
+                const uploadedUrls = await Promise.all(imageFiles.map(async (file: File) => {
+                  const storageRef = ref(storage, `covers/products/${Date.now()}_${file.name}`)
+                  await uploadBytes(storageRef, file)
+                  return getDownloadURL(storageRef)
+                }))
+                cover_images = [...cover_images, ...uploadedUrls]
+              }
+
+              const saveData = {
+                ...data,
+                cover_images,
+
+                // Ensure defaults
+                downloads: editingItem ? (editingItem as Product).downloads || 0 : 0
+              }
+
               if (editingItem) {
-                await updateDoc(doc(db, 'products', editingItem.id), data)
-                setProducts(products.map(p => p.id === editingItem.id ? { ...p, ...data } : p))
+                await updateDoc(doc(db, 'products', editingItem.id), saveData)
+                setProducts(products.map(p => p.id === editingItem.id ? { ...p, ...saveData } : p))
               } else {
-                const docRef = await addDoc(collection(db, 'products'), { ...data, created_at: new Date().toISOString(), downloads: 0 })
-                setProducts([{ id: docRef.id, ...data, downloads: 0, created_at: new Date().toISOString() } as Product, ...products])
+                const docRef = await addDoc(collection(db, 'products'), { ...saveData, created_at: new Date().toISOString() })
+                setProducts([{ id: docRef.id, ...saveData, created_at: new Date().toISOString() } as Product, ...products])
               }
               setShowProductModal(false)
               setEditingItem(null)
-            } catch (error) {
+            } catch (error: any) {
               console.error('Error saving product:', error)
+              alert(`Failed to save product: ${error.message}`)
             }
           }}
         />
       )}
 
       {showMixtapeModal && (
-        <MixtapeModal 
+        <MixtapeModal
           mixtape={editingItem as Mixtape | null}
           onClose={() => { setShowMixtapeModal(false); setEditingItem(null) }}
           onSave={async (data, imageFile) => {
             try {
-              let coverImage = data.coverImage
+              let cover_image = data.coverImage || data.cover_image
               if (imageFile) {
                 const storageRef = ref(storage, `covers/mixtapes/${Date.now()}_${imageFile.name}`)
                 await uploadBytes(storageRef, imageFile)
-                coverImage = await getDownloadURL(storageRef)
+                cover_image = await getDownloadURL(storageRef)
               }
-              const saveData = { ...data, coverImage }
+              const saveData = { ...data, cover_image, coverImage: undefined }
+              // Remove coverImage field to avoid duplication
+              delete saveData.coverImage
+
               if (editingItem) {
                 await updateDoc(doc(db, 'mixtapes', editingItem.id), saveData)
                 setMixtapes(mixtapes.map(m => m.id === editingItem.id ? { ...m, ...saveData } : m))
@@ -686,18 +770,21 @@ function AdminContent() {
       )}
 
       {showTrackModal && (
-        <TrackModal 
+        <TrackModal
           track={editingItem as MusicPoolTrack | null}
           onClose={() => { setShowTrackModal(false); setEditingItem(null) }}
           onSave={async (data, imageFile) => {
             try {
-              let coverImage = data.coverImage
+              let cover_image = data.coverImage || data.cover_image
               if (imageFile) {
                 const storageRef = ref(storage, `covers/music_pool/${Date.now()}_${imageFile.name}`)
                 await uploadBytes(storageRef, imageFile)
-                coverImage = await getDownloadURL(storageRef)
+                cover_image = await getDownloadURL(storageRef)
               }
-              const saveData = { ...data, coverImage }
+              const saveData = { ...data, cover_image, coverImage: undefined }
+              // Remove coverImage field to avoid duplication
+              delete saveData.coverImage
+
               if (editingItem) {
                 await updateDoc(doc(db, 'music_pool', editingItem.id), saveData)
                 setMusicPool(musicPool.map(t => t.id === editingItem.id ? { ...t, ...saveData } : t))
@@ -716,41 +803,41 @@ function AdminContent() {
       )}
 
       {showTelegramTokenModal && (
-        <TelegramTokenModal 
+        <TelegramTokenModal
           currentToken={siteSettings.telegramBotToken}
           onClose={() => setShowTelegramTokenModal(false)}
-          onSave={async (token) => { 
+          onSave={async (token) => {
             await saveSiteSettings({ telegramBotToken: token })
-            setShowTelegramTokenModal(false) 
+            setShowTelegramTokenModal(false)
           }}
         />
       )}
 
       {showChannelModal && (
-        <ChannelManagementModal 
+        <ChannelManagementModal
           channels={siteSettings.telegramChannels}
           onClose={() => setShowChannelModal(false)}
-          onSave={async (channels) => { 
+          onSave={async (channels) => {
             await saveSiteSettings({ telegramChannels: channels })
-            setShowChannelModal(false) 
+            setShowChannelModal(false)
           }}
         />
       )}
 
       {showPaymentConfigModal && (
-        <PaymentConfigModal 
+        <PaymentConfigModal
           type={showPaymentConfigModal}
           settings={siteSettings}
           onClose={() => setShowPaymentConfigModal(null)}
-          onSave={async (data) => { 
+          onSave={async (data) => {
             await saveSiteSettings(data)
-            setShowPaymentConfigModal(null) 
+            setShowPaymentConfigModal(null)
           }}
         />
       )}
 
       {showEmailTemplateModal && (
-        <EmailTemplateModal 
+        <EmailTemplateModal
           template={showEmailTemplateModal}
           onClose={() => setShowEmailTemplateModal(null)}
         />
@@ -800,8 +887,8 @@ function DashboardTab({ stats, bookings, transactions, formatCurrency, formatDat
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">Overview</h3>
-        <select 
-          value={dateFilter} 
+        <select
+          value={dateFilter}
           onChange={(e) => setDateFilter(e.target.value)}
           className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm focus:outline-none focus:border-violet-500/50"
         >
@@ -866,7 +953,7 @@ function DashboardTab({ stats, bookings, transactions, formatCurrency, formatDat
 }
 
 function UsersTab({ users, searchQuery, formatDate, getStatusBadge, onUpdateStatus, onUpdateRole }: any) {
-  const filteredUsers = users.filter((u: UserData) => 
+  const filteredUsers = users.filter((u: UserData) =>
     u.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     u.email?.toLowerCase().includes(searchQuery.toLowerCase())
   )
@@ -918,11 +1005,10 @@ function UsersTab({ users, searchQuery, formatDate, getStatusBadge, onUpdateStat
                     <select
                       value={u.account_status}
                       onChange={(e) => onUpdateStatus(u.id, e.target.value)}
-                      className={`px-2 py-1 rounded-lg text-sm focus:outline-none ${
-                        u.account_status === 'active' ? 'bg-emerald-500/20 text-emerald-400' :
+                      className={`px-2 py-1 rounded-lg text-sm focus:outline-none ${u.account_status === 'active' ? 'bg-emerald-500/20 text-emerald-400' :
                         u.account_status === 'suspended' ? 'bg-red-500/20 text-red-400' :
-                        'bg-amber-500/20 text-amber-400'
-                      }`}
+                          'bg-amber-500/20 text-amber-400'
+                        }`}
                     >
                       <option value="active">Active</option>
                       <option value="suspended">Suspended</option>
@@ -946,11 +1032,12 @@ function UsersTab({ users, searchQuery, formatDate, getStatusBadge, onUpdateStat
 }
 
 function ProductsTab({ products, searchQuery, formatCurrency, formatDate, getStatusBadge, onDelete, onAdd, onEdit }: any) {
-  const filteredProducts = products.filter((p: Product) => 
+  const filteredProducts = products.filter((p: Product) =>
     p.title?.toLowerCase().includes(searchQuery.toLowerCase())
   )
-  const digitalProducts = filteredProducts.filter((p: Product) => p.type === 'digital')
-  const physicalProducts = filteredProducts.filter((p: Product) => p.type === 'physical')
+  // Handle both new and legacy field names
+  const digitalProducts = filteredProducts.filter((p: Product) => (p.product_type === 'digital' || (p as any).type === 'digital'))
+  const physicalProducts = filteredProducts.filter((p: Product) => (p.product_type === 'physical' || (p as any).type === 'physical'))
 
   return (
     <div className="space-y-6">
@@ -960,7 +1047,7 @@ function ProductsTab({ products, searchQuery, formatCurrency, formatDate, getSta
           <span className="text-xs px-2 py-1 rounded bg-blue-500/20 text-blue-400">{digitalProducts.length} digital</span>
           <span className="text-xs px-2 py-1 rounded bg-amber-500/20 text-amber-400">{physicalProducts.length} physical</span>
         </div>
-        <button 
+        <button
           onClick={onAdd}
           className="px-4 py-2 rounded-xl bg-violet-500 hover:bg-violet-600 font-medium text-sm flex items-center gap-2"
         >
@@ -973,56 +1060,69 @@ function ProductsTab({ products, searchQuery, formatCurrency, formatDate, getSta
         <ul className="text-xs text-white/50 space-y-1">
           <li>• Digital products: Support versioning, instant download access</li>
           <li>• Physical products: Stock tracking, SKU, delivery/shipping management</li>
-          <li>• No image uploads for products</li>
         </ul>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredProducts.map((product: Product) => (
-          <div key={product.id} className="bg-white/5 rounded-2xl border border-white/10 overflow-hidden">
-            <div className="aspect-video bg-white/5 relative flex items-center justify-center">
-              <Package size={40} className="text-white/20" />
-              <span className={`absolute top-2 right-2 px-2 py-1 rounded-lg text-xs font-medium ${
-                product.type === 'digital' ? 'bg-blue-500/80' : 'bg-amber-500/80'
-              }`}>
-                {product.type}
-              </span>
-            </div>
-            <div className="p-4">
-              <div className="flex items-start justify-between mb-2">
-                <div>
-                  <h3 className="font-semibold">{product.title}</h3>
-                  {product.version && <p className="text-xs text-white/50">v{product.version}</p>}
-                </div>
-                <span className={`px-2 py-0.5 rounded text-xs ${getStatusBadge(product.status)}`}>{product.status}</span>
-              </div>
-              <p className="text-violet-400 font-semibold mb-2">{formatCurrency(product.price)}</p>
-              <div className="flex items-center justify-between text-xs text-white/50">
-                {product.type === 'digital' ? (
-                  <span>{product.downloads || 0} downloads</span>
+        {filteredProducts.map((product: Product & { type?: string; stock?: number }) => {
+          const productType = product.product_type || product.type || 'digital'
+          const stock = product.stock_quantity || product.stock || 0
+          const image = product.cover_images?.[0] || product.image_url // Fallback
+
+          return (
+            <div key={product.id} className="bg-white/5 rounded-2xl border border-white/10 overflow-hidden">
+              <div className="aspect-video bg-white/5 relative flex items-center justify-center overflow-hidden">
+                {image ? (
+                  <img src={image} alt={product.title} className="w-full h-full object-cover" />
                 ) : (
-                  <span>Stock: {product.stock || 0}</span>
+                  <Package size={40} className="text-white/20" />
                 )}
-                <span>{formatDate(product.created_at)}</span>
+                <span className={`absolute top-2 right-2 px-2 py-1 rounded-lg text-xs font-medium ${productType === 'digital' ? 'bg-blue-500/80' : 'bg-amber-500/80'
+                  }`}>
+                  {productType}
+                </span>
+                {stock === 0 && productType === 'physical' && (
+                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                    <span className="text-red-500 font-bold border border-red-500 px-3 py-1 rounded">OUT OF STOCK</span>
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/10">
-                <button onClick={() => onEdit(product)} className="flex-1 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-sm">
-                  Edit
-                </button>
-                <button onClick={() => onDelete(product.id)} className="p-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400">
-                  <Trash2 size={16} />
-                </button>
+              <div className="p-4">
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <h3 className="font-semibold truncate pr-2">{product.title}</h3>
+                    {product.version && <p className="text-xs text-white/50">v{product.version}</p>}
+                  </div>
+                  <span className={`px-2 py-0.5 rounded text-xs capitalize ${getStatusBadge(product.status)}`}>{product.status}</span>
+                </div>
+                <p className="text-violet-400 font-semibold mb-2">{formatCurrency(product.price)}</p>
+                <div className="flex items-center justify-between text-xs text-white/50">
+                  {productType === 'digital' ? (
+                    <span>{product.downloads || 0} downloads</span>
+                  ) : (
+                    <span>Stock: {stock}</span>
+                  )}
+                  <span>{formatDate(product.created_at)}</span>
+                </div>
+                <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/10">
+                  <button onClick={() => onEdit(product)} className="flex-1 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-sm">
+                    Edit
+                  </button>
+                  <button onClick={() => onDelete(product.id)} className="p-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
 }
 
 function MixtapesTab({ mixtapes, searchQuery, formatCurrency, formatDate, onDelete, onAdd, onEdit }: any) {
-  const filteredMixtapes = mixtapes.filter((m: Mixtape) => 
+  const filteredMixtapes = mixtapes.filter((m: Mixtape) =>
     m.title?.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
@@ -1030,7 +1130,7 @@ function MixtapesTab({ mixtapes, searchQuery, formatCurrency, formatDate, onDele
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <span className="text-white/50">{filteredMixtapes.length} mixtapes</span>
-        <button 
+        <button
           onClick={onAdd}
           className="px-4 py-2 rounded-xl bg-fuchsia-500 hover:bg-fuchsia-600 font-medium text-sm flex items-center gap-2"
         >
@@ -1077,9 +1177,9 @@ function MixtapesTab({ mixtapes, searchQuery, formatCurrency, formatDate, onDele
                 </span>
               </div>
               {mixtape.mixLink && (
-                <a 
-                  href={mixtape.mixLink} 
-                  target="_blank" 
+                <a
+                  href={mixtape.mixLink}
+                  target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 text-xs text-violet-400 hover:text-violet-300 mb-3"
                 >
@@ -1102,8 +1202,8 @@ function MixtapesTab({ mixtapes, searchQuery, formatCurrency, formatDate, onDele
   )
 }
 
-function MusicPoolTab({ tracks, subscriptions, searchQuery, onDelete, onAdd, onEdit }: any) {
-  const filteredTracks = tracks.filter((t: MusicPoolTrack) => 
+function MusicPoolTab({ tracks, subscriptions, plans, searchQuery, onDelete, onAdd, onEdit, onAddPlan, onEditPlan, onDeletePlan }: any) {
+  const filteredTracks = tracks.filter((t: MusicPoolTrack) =>
     t.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     t.artist?.toLowerCase().includes(searchQuery.toLowerCase())
   )
@@ -1116,7 +1216,7 @@ function MusicPoolTab({ tracks, subscriptions, searchQuery, onDelete, onAdd, onE
           <span className="text-white/50">{filteredTracks.length} tracks</span>
           <span className="text-xs px-2 py-1 rounded bg-amber-500/20 text-amber-400">{activeSubscribers} active subscribers</span>
         </div>
-        <button 
+        <button
           onClick={onAdd}
           className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-black font-medium text-sm flex items-center gap-2"
         >
@@ -1149,6 +1249,46 @@ function MusicPoolTab({ tracks, subscriptions, searchQuery, onDelete, onAdd, onE
         <div className="bg-white/5 rounded-xl border border-white/10 p-4">
           <p className="text-white/50 text-sm">Active Subscribers</p>
           <p className="text-2xl font-bold">{activeSubscribers}</p>
+        </div>
+      </div>
+
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-white">Subscription Plans</h3>
+          <button
+            onClick={onAddPlan}
+            className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white font-medium text-sm border border-white/10"
+          >
+            Manage Plans
+          </button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {plans?.map((plan: Plan) => (
+            <div key={plan.id} className="p-6 rounded-2xl bg-white/5 border border-white/10 hover:border-violet-500/50 transition-all">
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <h4 className="font-bold text-lg text-white capitalize">{plan.name}</h4>
+                  <p className="text-white/50 text-sm capitalize">{plan.duration}ly Billing</p>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => onEditPlan(plan)} className="p-2 rounded-lg hover:bg-white/10 text-white/70"><Edit2 size={16} /></button>
+                  <button onClick={() => onDeletePlan(plan.id)} className="p-2 rounded-lg hover:bg-white/10 text-red-400"><Trash2 size={16} /></button>
+                </div>
+              </div>
+              <div className="text-3xl font-bold text-white mb-6">
+                {formatCurrency(plan.price)}
+                <span className="text-sm text-white/40 font-normal">/{plan.duration === 'month' ? 'mo' : 'yr'}</span>
+              </div>
+              <div className="space-y-2">
+                {plan.features?.map((f, i) => (
+                  <div key={i} className="flex items-center gap-2 text-sm text-white/70">
+                    <div className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+                    {f}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -1186,11 +1326,10 @@ function MusicPoolTab({ tracks, subscriptions, searchQuery, onDelete, onAdd, onE
                 <td className="p-4 text-white/70">{track.genre}</td>
                 <td className="p-4 text-white/70">{track.bpm}</td>
                 <td className="p-4">
-                  <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
-                    track.tier === 'unlimited' ? 'bg-amber-500/20 text-amber-400' :
+                  <span className={`px-2 py-1 rounded-lg text-xs font-medium ${track.tier === 'unlimited' ? 'bg-amber-500/20 text-amber-400' :
                     track.tier === 'pro' ? 'bg-violet-500/20 text-violet-400' :
-                    'bg-white/10 text-white/70'
-                  }`}>
+                      'bg-white/10 text-white/70'
+                    }`}>
                     {track.tier}
                   </span>
                 </td>
@@ -1220,7 +1359,7 @@ function MusicPoolTab({ tracks, subscriptions, searchQuery, onDelete, onAdd, onE
 }
 
 function SubscriptionsTab({ subscriptions, searchQuery, formatDate, getStatusBadge }: any) {
-  const filteredSubs = subscriptions.filter((s: Subscription) => 
+  const filteredSubs = subscriptions.filter((s: Subscription) =>
     s.user_email?.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
@@ -1268,11 +1407,10 @@ function SubscriptionsTab({ subscriptions, searchQuery, formatDate, getStatusBad
               <tr key={sub.id} className="border-b border-white/5 hover:bg-white/5">
                 <td className="p-4">{sub.user_email}</td>
                 <td className="p-4">
-                  <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${
-                    sub.tier === 'unlimited' ? 'bg-amber-500/20 text-amber-400' :
+                  <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${sub.tier === 'unlimited' ? 'bg-amber-500/20 text-amber-400' :
                     sub.tier === 'pro' ? 'bg-violet-500/20 text-violet-400' :
-                    'bg-white/10 text-white/70'
-                  }`}>
+                      'bg-white/10 text-white/70'
+                    }`}>
                     {sub.tier}
                   </span>
                 </td>
@@ -1300,7 +1438,7 @@ function SubscriptionsTab({ subscriptions, searchQuery, formatDate, getStatusBad
 }
 
 function BookingsTab({ bookings, searchQuery, formatCurrency, formatDate, getStatusBadge, onUpdateStatus }: any) {
-  const filteredBookings = bookings.filter((b: Booking) => 
+  const filteredBookings = bookings.filter((b: Booking) =>
     b.customer_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     b.email?.toLowerCase().includes(searchQuery.toLowerCase())
   )
@@ -1364,10 +1502,43 @@ function BookingsTab({ bookings, searchQuery, formatCurrency, formatDate, getSta
 }
 
 function PaymentsTab({ transactions, stats, searchQuery, formatCurrency, formatDate, getStatusBadge }: any) {
-  const filteredTx = transactions.filter((t: Transaction) => 
-    t.user_email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    t.reference?.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const [filterType, setFilterType] = useState('all')
+  const [filterStatus, setFilterStatus] = useState('all')
+  const [page, setPage] = useState(1)
+  const itemsPerPage = 20
+
+  const filteredTx = transactions.filter((t: Transaction) => {
+    const matchesSearch = t.user_email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      t.reference?.toLowerCase().includes(searchQuery.toLowerCase())
+    const matchesType = filterType === 'all' || t.type === filterType
+    const matchesStatus = filterStatus === 'all' || t.status === filterStatus
+    return matchesSearch && matchesType && matchesStatus
+  })
+
+  const totalPages = Math.ceil(filteredTx.length / itemsPerPage)
+  const paginatedTx = filteredTx.slice((page - 1) * itemsPerPage, page * itemsPerPage)
+
+  const handleExportCSV = () => {
+    const headers = ['Reference', 'User', 'Type', 'Method', 'Amount', 'Status', 'Date']
+    const csvContent = [
+      headers.join(','),
+      ...filteredTx.map((tx: Transaction) => [
+        tx.reference || '',
+        tx.user_email || '',
+        tx.type || '',
+        tx.payment_method || '',
+        tx.amount || 0,
+        tx.status || '',
+        new Date(tx.created_at).toLocaleDateString()
+      ].join(','))
+    ].join('\n')
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = `transactions_${new Date().toISOString()}.csv`
+    link.click()
+  }
 
   return (
     <div className="space-y-6">
@@ -1386,11 +1557,46 @@ function PaymentsTab({ transactions, stats, searchQuery, formatCurrency, formatD
         </div>
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <h3 className="font-semibold">Transaction History</h3>
-        <button className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-sm flex items-center gap-2 hover:bg-white/10">
-          <Download size={16} /> Export CSV
-        </button>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative">
+            <select
+              value={filterType}
+              onChange={(e) => { setFilterType(e.target.value); setPage(1) }}
+              className="appearance-none pl-3 pr-8 py-2 rounded-xl bg-white/5 border border-white/10 text-sm focus:outline-none focus:border-white/20"
+            >
+              <option value="all" className="bg-zinc-900">All Types</option>
+              <option value="digital" className="bg-zinc-900">Digital</option>
+              <option value="physical" className="bg-zinc-900">Physical</option>
+              <option value="subscription" className="bg-zinc-900">Subscription</option>
+              <option value="tip" className="bg-zinc-900">Tip</option>
+            </select>
+            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 pointer-events-none" />
+          </div>
+
+          <div className="relative">
+            <select
+              value={filterStatus}
+              onChange={(e) => { setFilterStatus(e.target.value); setPage(1) }}
+              className="appearance-none pl-3 pr-8 py-2 rounded-xl bg-white/5 border border-white/10 text-sm focus:outline-none focus:border-white/20"
+            >
+              <option value="all" className="bg-zinc-900">All Status</option>
+              <option value="success" className="bg-zinc-900">Success</option>
+              <option value="pending" className="bg-zinc-900">Pending</option>
+              <option value="failed" className="bg-zinc-900">Failed</option>
+            </select>
+            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 pointer-events-none" />
+          </div>
+
+          <button
+            onClick={handleExportCSV}
+            className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-sm flex items-center gap-2 hover:bg-white/10"
+          >
+            <Download size={16} /> Export CSV
+          </button>
+        </div>
       </div>
 
       <div className="bg-white/5 rounded-2xl border border-white/10 overflow-hidden">
@@ -1408,7 +1614,7 @@ function PaymentsTab({ transactions, stats, searchQuery, formatCurrency, formatD
               </tr>
             </thead>
             <tbody>
-              {filteredTx.map((tx: Transaction) => (
+              {paginatedTx.map((tx: Transaction) => (
                 <tr key={tx.id} className="border-b border-white/5 hover:bg-white/5">
                   <td className="p-4 font-mono text-sm">{tx.reference?.slice(0, 12)}...</td>
                   <td className="p-4 text-white/70">{tx.user_email}</td>
@@ -1426,65 +1632,193 @@ function PaymentsTab({ transactions, stats, searchQuery, formatCurrency, formatD
             </tbody>
           </table>
         </div>
+
+        {totalPages > 1 && (
+          <div className="p-4 border-t border-white/10 flex items-center justify-between text-sm">
+            <span className="text-white/50">Page {page} of {totalPages}</span>
+            <div className="flex gap-2">
+              <button
+                disabled={page === 1}
+                onClick={() => setPage(p => p - 1)}
+                className="p-1 rounded bg-white/5 disabled:opacity-50 hover:bg-white/10"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <button
+                disabled={page === totalPages}
+                onClick={() => setPage(p => p + 1)}
+                className="p-1 rounded bg-white/5 disabled:opacity-50 hover:bg-white/10"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
-function TipsTab({ tips, formatCurrency, formatDate }: any) {
-  const totalTips = tips.reduce((sum: number, t: Tip) => sum + (t.amount || 0), 0)
+function TipsTab({ tips, searchQuery, formatCurrency, formatDate }: any) {
+  const [filterSource, setFilterSource] = useState('all')
+  const [page, setPage] = useState(1)
+  const itemsPerPage = 20
+
+  // Calculate Global Metrics
+  const totalAmount = tips.reduce((sum: number, t: Tip) => sum + (t.amount || 0), 0)
+  const averageTip = tips.length > 0 ? totalAmount / tips.length : 0
+
+  const filteredTips = tips.filter((t: Tip) => {
+    const matchesSearch = t.donor_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      t.message?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      t.donor_email?.toLowerCase().includes(searchQuery.toLowerCase())
+    const matchesSource = filterSource === 'all' || t.source?.toLowerCase() === filterSource.toLowerCase()
+    return matchesSearch && matchesSource
+  })
+
+  const totalPages = Math.ceil(filteredTips.length / itemsPerPage)
+  const paginatedTips = filteredTips.slice((page - 1) * itemsPerPage, page * itemsPerPage)
+
+  const handleExportCSV = () => {
+    const headers = ['Donor Name', 'Email', 'Amount', 'Message', 'Source', 'Date']
+    const csvContent = [
+      headers.join(','),
+      ...filteredTips.map((t: Tip) => [
+        `"${t.donor_name || 'Anonymous'}"`,
+        t.donor_email || '',
+        t.amount || 0,
+        `"${t.message || ''}"`,
+        t.source || 'website',
+        new Date(t.created_at).toLocaleDateString()
+      ].join(','))
+    ].join('\n')
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = `tips_${new Date().toISOString()}.csv`
+    link.click()
+  }
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-rose-500/10 rounded-xl border border-rose-500/20 p-5">
-          <p className="text-rose-400 text-sm mb-1">Total Tips</p>
-          <p className="text-2xl font-bold">{formatCurrency(totalTips)}</p>
+          <p className="text-rose-400 text-sm mb-1">Total Tips Value</p>
+          <p className="text-2xl font-bold">{formatCurrency(totalAmount)}</p>
         </div>
         <div className="bg-white/5 rounded-xl border border-white/10 p-5">
           <p className="text-white/50 text-sm mb-1">Total Donations</p>
           <p className="text-2xl font-bold">{tips.length}</p>
         </div>
-        <div className="bg-white/5 rounded-xl border border-white/10 p-5">
-          <p className="text-white/50 text-sm mb-1">Average Tip</p>
-          <p className="text-2xl font-bold">{tips.length > 0 ? formatCurrency(totalTips / tips.length) : formatCurrency(0)}</p>
+        <div className="bg-purple-500/10 rounded-xl border border-purple-500/20 p-5">
+          <p className="text-purple-400 text-sm mb-1">Average Tip</p>
+          <p className="text-2xl font-bold">{formatCurrency(averageTip)}</p>
+        </div>
+      </div>
+
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <h3 className="font-semibold">Donation History</h3>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative">
+            <select
+              value={filterSource}
+              onChange={(e) => { setFilterSource(e.target.value); setPage(1) }}
+              className="appearance-none pl-3 pr-8 py-2 rounded-xl bg-white/5 border border-white/10 text-sm focus:outline-none focus:border-white/20 capitalize"
+            >
+              <option value="all" className="bg-zinc-900">All Sources</option>
+              <option value="website" className="bg-zinc-900">Website</option>
+              <option value="mixtape" className="bg-zinc-900">Mixtape</option>
+              <option value="music_pool" className="bg-zinc-900">Music Pool</option>
+              <option value="livestream" className="bg-zinc-900">Livestream</option>
+            </select>
+            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 pointer-events-none" />
+          </div>
+
+          <button
+            onClick={handleExportCSV}
+            className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-sm flex items-center gap-2 hover:bg-white/10"
+          >
+            <Download size={16} /> Export CSV
+          </button>
         </div>
       </div>
 
       <div className="bg-white/5 rounded-2xl border border-white/10 overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-white/10">
-              <th className="text-left p-4 text-white/50 font-medium text-sm">Donor</th>
-              <th className="text-left p-4 text-white/50 font-medium text-sm">Amount</th>
-              <th className="text-left p-4 text-white/50 font-medium text-sm">Message</th>
-              <th className="text-left p-4 text-white/50 font-medium text-sm">Source</th>
-              <th className="text-left p-4 text-white/50 font-medium text-sm">Date</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tips.map((tip: Tip) => (
-              <tr key={tip.id} className="border-b border-white/5 hover:bg-white/5">
-                <td className="p-4">
-                  <p className="font-medium">{tip.donor_name || 'Anonymous'}</p>
-                  <p className="text-sm text-white/50">{tip.donor_email}</p>
-                </td>
-                <td className="p-4 font-medium text-rose-400">{formatCurrency(tip.amount)}</td>
-                <td className="p-4 text-white/70 text-sm max-w-xs truncate">{tip.message || '-'}</td>
-                <td className="p-4 capitalize text-white/70">{tip.source || 'website'}</td>
-                <td className="p-4 text-white/70 text-sm">{formatDate(tip.created_at)}</td>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-white/10">
+                <th className="text-left p-4 text-white/50 font-medium text-sm">Donor</th>
+                <th className="text-left p-4 text-white/50 font-medium text-sm">Amount</th>
+                <th className="text-left p-4 text-white/50 font-medium text-sm">Message</th>
+                <th className="text-left p-4 text-white/50 font-medium text-sm">Source</th>
+                <th className="text-left p-4 text-white/50 font-medium text-sm">Date</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {paginatedTips.map((t: Tip) => (
+                <tr key={t.id} className="border-b border-white/5 hover:bg-white/5">
+                  <td className="p-4">
+                    <div className="font-medium text-white">{t.donor_name || 'Anonymous'}</div>
+                    <div className="text-xs text-white/50">{t.donor_email}</div>
+                  </td>
+                  <td className="p-4 font-bold text-rose-400">{formatCurrency(t.amount)}</td>
+                  <td className="p-4 text-white/70 text-sm max-w-xs truncate">{t.message || '-'}</td>
+                  <td className="p-4">
+                    <span className="px-2 py-1 rounded-lg bg-white/5 text-xs border border-white/10 capitalize">
+                      {t.source}
+                    </span>
+                  </td>
+                  <td className="p-4 text-white/70 text-sm">{formatDate(t.created_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {totalPages > 1 && (
+          <div className="p-4 border-t border-white/10 flex items-center justify-between text-sm">
+            <span className="text-white/50">Page {page} of {totalPages}</span>
+            <div className="flex gap-2">
+              <button
+                disabled={page === 1}
+                onClick={() => setPage(p => p - 1)}
+                className="p-1 rounded bg-white/5 disabled:opacity-50 hover:bg-white/10"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <button
+                disabled={page === totalPages}
+                onClick={() => setPage(p => p + 1)}
+                className="p-1 rounded bg-white/5 disabled:opacity-50 hover:bg-white/10"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
 function TelegramTab({ subscriptions, users, settings, onConfigureToken, onManageChannels, onToggleAutoSync }: any) {
+  const [userSearch, setUserSearch] = useState('')
   const activeSubscribers = subscriptions.filter((s: Subscription) => s.status === 'active')
-  const connectedUsers = users.filter((u: UserData) => u.telegram_user_id).length
+  const connectedUsers = users.filter((u: UserData) => u.telegram_user_id || u.telegram_username)
+
+  const filteredUsers = connectedUsers.filter((u: UserData) =>
+    u.email?.toLowerCase().includes(userSearch.toLowerCase()) ||
+    u.telegram_username?.toLowerCase().includes(userSearch.toLowerCase())
+  )
+
+  const mockLogs = [
+    { id: 1, action: 'User Added', details: 'Added john@example.com to Music Pool', date: new Date(Date.now() - 1000 * 60 * 5).toISOString() },
+    { id: 2, action: 'Sync', details: 'Auto-sync completed for 45 users', date: new Date(Date.now() - 1000 * 60 * 60).toISOString() },
+    { id: 3, action: 'Channel Update', details: 'Added new channel "Afrobeats Daily"', date: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString() },
+  ]
 
   return (
     <div className="space-y-6">
@@ -1497,7 +1831,7 @@ function TelegramTab({ subscriptions, users, settings, onConfigureToken, onManag
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div className="bg-white/5 rounded-xl p-4">
             <p className="text-white/50 text-sm">Connected Users</p>
-            <p className="text-2xl font-bold">{connectedUsers}</p>
+            <p className="text-2xl font-bold">{connectedUsers.length}</p>
           </div>
           <div className="bg-white/5 rounded-xl p-4">
             <p className="text-white/50 text-sm">Active Subscribers</p>
@@ -1506,42 +1840,111 @@ function TelegramTab({ subscriptions, users, settings, onConfigureToken, onManag
           <div className="bg-white/5 rounded-xl p-4">
             <p className="text-white/50 text-sm">Bot Status</p>
             <p className={`font-medium flex items-center gap-2 ${settings.telegramBotToken ? 'text-emerald-400' : 'text-amber-400'}`}>
-              <span className={`w-2 h-2 rounded-full ${settings.telegramBotToken ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span> 
+              <span className={`w-2 h-2 rounded-full ${settings.telegramBotToken ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
               {settings.telegramBotToken ? 'Online' : 'Not Configured'}
             </p>
           </div>
         </div>
 
-        <div className="space-y-4">
-          <div className="flex items-center justify-between p-4 rounded-xl bg-white/5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="flex items-center justify-between p-4 rounded-xl bg-white/5 border border-white/10">
             <div>
               <p className="font-medium">Bot Token</p>
               <p className="text-sm text-white/50">
-                {settings.telegramBotToken ? `${settings.telegramBotToken.slice(0, 10)}...${settings.telegramBotToken.slice(-5)}` : 'Not configured'}
+                {settings.telegramBotToken ? 'Configured' : 'Not configured'}
               </p>
             </div>
-            <button onClick={onConfigureToken} className="px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-sm font-medium">
-              {settings.telegramBotToken ? 'Update' : 'Configure'}
+            <button onClick={onConfigureToken} className="px-3 py-1.5 rounded-lg bg-blue-500 hover:bg-blue-600 text-xs font-medium">
+              {settings.telegramBotToken ? 'Update' : 'Setup'}
             </button>
           </div>
-          <div className="flex items-center justify-between p-4 rounded-xl bg-white/5">
+          <div className="flex items-center justify-between p-4 rounded-xl bg-white/5 border border-white/10">
             <div>
-              <p className="font-medium">Channel Management</p>
-              <p className="text-sm text-white/50">{settings.telegramChannels?.length || 0} channels configured</p>
+              <p className="font-medium">Channels</p>
+              <p className="text-sm text-white/50">{settings.telegramChannels?.length || 0} active</p>
             </div>
-            <button onClick={onManageChannels} className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-sm">Manage</button>
+            <button onClick={onManageChannels} className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-xs text-white">Manage</button>
           </div>
-          <div className="flex items-center justify-between p-4 rounded-xl bg-white/5">
+          <div className="flex items-center justify-between p-4 rounded-xl bg-white/5 border border-white/10">
             <div>
               <p className="font-medium">Auto-Sync</p>
-              <p className="text-sm text-white/50">Automatically sync subscription status with Telegram channels</p>
+              <p className="text-sm text-white/50">{settings.autoSyncEnabled ? 'On' : 'Off'}</p>
             </div>
-            <button 
+            <button
               onClick={onToggleAutoSync}
-              className={`px-4 py-2 rounded-lg text-sm font-medium ${settings.autoSyncEnabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/10 text-white/50'}`}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium ${settings.autoSyncEnabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/10 text-white/50'}`}
             >
-              {settings.autoSyncEnabled ? 'Enabled' : 'Disabled'}
+              Toggle
             </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Connected Users Table */}
+        <div className="lg:col-span-2 bg-white/5 rounded-2xl border border-white/10 overflow-hidden">
+          <div className="p-4 border-b border-white/10 flex items-center justify-between">
+            <h3 className="font-semibold">Connected Users</h3>
+            <div className="relative w-48">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/50" />
+              <input
+                type="text"
+                placeholder="Search..."
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+                className="w-full bg-black/20 border border-white/10 rounded-lg pl-9 pr-3 py-1.5 text-xs focus:outline-none focus:border-white/30"
+              />
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-white/5">
+                <tr>
+                  <th className="text-left p-3 font-medium text-white/50">User</th>
+                  <th className="text-left p-3 font-medium text-white/50">Telegram ID</th>
+                  <th className="text-left p-3 font-medium text-white/50">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredUsers.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="p-8 text-center text-white/40">No connected users found</td>
+                  </tr>
+                ) : (
+                  filteredUsers.slice(0, 5).map((u: UserData) => (
+                    <tr key={u.id} className="border-b border-white/5">
+                      <td className="p-3">
+                        <div className="font-medium">{u.name || 'User'}</div>
+                        <div className="text-xs text-white/50">{u.email}</div>
+                      </td>
+                      <td className="p-3 font-mono text-xs text-blue-300">@{u.telegram_username || 'N/A'}</td>
+                      <td className="p-3">
+                        <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-xs border border-emerald-500/20">Synced</span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Logs */}
+        <div className="bg-white/5 rounded-2xl border border-white/10 overflow-hidden flex flex-col">
+          <div className="p-4 border-b border-white/10">
+            <h3 className="font-semibold">System Logs</h3>
+          </div>
+          <div className="p-4 space-y-4 overflow-y-auto max-h-[300px]">
+            {mockLogs.map(log => (
+              <div key={log.id} className="flex gap-3 text-sm">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-2 shrink-0" />
+                <div>
+                  <p className="font-medium text-white/90">{log.action}</p>
+                  <p className="text-white/50 text-xs">{log.details}</p>
+                  <p className="text-white/30 text-[10px] mt-1">{new Date(log.date).toLocaleString()}</p>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -1595,6 +1998,226 @@ function ReportsTab({ users, transactions, bookings }: any) {
   )
 }
 
+function ShippingTab({ orders, formatDate, formatCurrency, getStatusBadge }: any) {
+  const [filterStatus, setFilterStatus] = useState('all')
+  const [page, setPage] = useState(1)
+  const itemsPerPage = 20
+  const [updatingOrder, setUpdatingOrder] = useState<string | null>(null)
+
+  // Filter for orders that require shipping (physical products)
+  const shippingOrders = orders.filter((o: any) => o.shipping_address || (o.items && o.items.some((i: any) => i.type === 'physical')))
+
+  const metrics = {
+    pending: shippingOrders.filter((o: any) => o.shipping_status === 'pending' || !o.shipping_status).length,
+    in_transit: shippingOrders.filter((o: any) => o.shipping_status === 'shipped').length,
+    delivered: shippingOrders.filter((o: any) => o.shipping_status === 'delivered').length,
+    failed: shippingOrders.filter((o: any) => o.shipping_status === 'failed' || o.shipping_status === 'returned').length
+  }
+
+  const filteredOrders = shippingOrders.filter((o: any) => {
+    if (filterStatus === 'all') return true
+    const status = o.shipping_status || 'pending'
+    return status === filterStatus
+  })
+
+  const totalPages = Math.ceil(filteredOrders.length / itemsPerPage)
+  const paginatedOrders = filteredOrders.slice((page - 1) * itemsPerPage, page * itemsPerPage)
+
+  const handleUpdateStatus = async (orderId: string, newStatus: string) => {
+    setUpdatingOrder(orderId)
+    try {
+      await updateDoc(doc(db, 'orders', orderId), {
+        shipping_status: newStatus,
+        updated_at: new Date().toISOString()
+      })
+      toast.success(`Order marked as ${newStatus}`)
+    } catch (error) {
+      console.error('Error updating status:', error)
+      toast.error('Failed to update status')
+    } finally {
+      setUpdatingOrder(null)
+    }
+  }
+
+  const handleUpdateCourier = async (orderId: string, courier: string) => {
+    try {
+      await updateDoc(doc(db, 'orders', orderId), {
+        courier_name: courier,
+        updated_at: new Date().toISOString()
+      })
+      toast.success(`Courier updated to ${courier}`)
+    } catch (error) {
+      toast.error('Failed to update courier')
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Metrics Dashboard */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div
+          onClick={() => setFilterStatus('pending')}
+          className={`cursor-pointer bg-amber-500/10 rounded-xl border p-5 transition-all ${filterStatus === 'pending' ? 'border-amber-500 ring-1 ring-amber-500' : 'border-amber-500/20 hover:bg-amber-500/20'}`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <Package className="text-amber-400" size={20} />
+            <span className="text-xs font-medium text-amber-400/70 uppercase">Pending</span>
+          </div>
+          <p className="text-2xl font-bold text-white">{metrics.pending}</p>
+          <p className="text-xs text-white/40 mt-1">To be packed</p>
+        </div>
+
+        <div
+          onClick={() => setFilterStatus('shipped')}
+          className={`cursor-pointer bg-blue-500/10 rounded-xl border p-5 transition-all ${filterStatus === 'shipped' ? 'border-blue-500 ring-1 ring-blue-500' : 'border-blue-500/20 hover:bg-blue-500/20'}`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <Truck className="text-blue-400" size={20} />
+            <span className="text-xs font-medium text-blue-400/70 uppercase">In Transit</span>
+          </div>
+          <p className="text-2xl font-bold text-white">{metrics.in_transit}</p>
+          <p className="text-xs text-white/40 mt-1">On the way</p>
+        </div>
+
+        <div
+          onClick={() => setFilterStatus('delivered')}
+          className={`cursor-pointer bg-emerald-500/10 rounded-xl border p-5 transition-all ${filterStatus === 'delivered' ? 'border-emerald-500 ring-1 ring-emerald-500' : 'border-emerald-500/20 hover:bg-emerald-500/20'}`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <Check className="text-emerald-400" size={20} />
+            <span className="text-xs font-medium text-emerald-400/70 uppercase">Delivered</span>
+          </div>
+          <p className="text-2xl font-bold text-white">{metrics.delivered}</p>
+          <p className="text-xs text-white/40 mt-1">Completed</p>
+        </div>
+
+        <div
+          onClick={() => setFilterStatus('failed')}
+          className={`cursor-pointer bg-red-500/10 rounded-xl border p-5 transition-all ${filterStatus === 'failed' ? 'border-red-500 ring-1 ring-red-500' : 'border-red-500/20 hover:bg-red-500/20'}`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <AlertCircle className="text-red-400" size={20} />
+            <span className="text-xs font-medium text-red-400/70 uppercase">Failed</span>
+          </div>
+          <p className="text-2xl font-bold text-white">{metrics.failed}</p>
+          <p className="text-xs text-white/40 mt-1">Returns / Issues</p>
+        </div>
+      </div>
+
+      {/* Orders Table */}
+      <div className="bg-white/5 rounded-2xl border border-white/10 overflow-hidden">
+        <div className="p-4 border-b border-white/10 flex items-center justify-between">
+          <h3 className="font-semibold">Shipping Orders</h3>
+          <div className="flex gap-2">
+            {filterStatus !== 'all' && (
+              <button onClick={() => setFilterStatus('all')} className="text-xs text-white/50 hover:text-white">Clear Filter</button>
+            )}
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-white/10 bg-white/5">
+                <th className="text-left p-4 font-medium text-white/50">Order ID</th>
+                <th className="text-left p-4 font-medium text-white/50">Customer</th>
+                <th className="text-left p-4 font-medium text-white/50">Location</th>
+                <th className="text-left p-4 font-medium text-white/50">Details</th>
+                <th className="text-left p-4 font-medium text-white/50">Status</th>
+                <th className="text-left p-4 font-medium text-white/50">Courier</th>
+                <th className="text-left p-4 font-medium text-white/50">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paginatedOrders.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="p-8 text-center text-white/40">No orders found</td>
+                </tr>
+              ) : (
+                paginatedOrders.map((order: any) => (
+                  <tr key={order.id} className="border-b border-white/5 hover:bg-white/5">
+                    <td className="p-4 font-mono text-xs">{order.id.slice(0, 8)}</td>
+                    <td className="p-4">
+                      <div className="font-medium">{order.user_email?.split('@')[0]}</div>
+                      <div className="text-xs text-white/50">{order.user_email}</div>
+                    </td>
+                    <td className="p-4 max-w-[150px] truncate" title={order.shipping_address}>
+                      {order.shipping_address || 'N/A'}
+                    </td>
+                    <td className="p-4">
+                      <p className="text-xs text-white/70">{order.items?.length || 0} items</p>
+                      <p className="font-medium text-cyan-400">{formatCurrency(order.total || 0)}</p>
+                    </td>
+                    <td className="p-4 py-2">
+                      <span className={`px-2 py-1 rounded text-xs border capitalize
+                        ${(!order.shipping_status || order.shipping_status === 'pending') ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                          order.shipping_status === 'shipped' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
+                            order.shipping_status === 'delivered' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                              'bg-red-500/10 text-red-400 border-red-500/20'
+                        }`}>
+                        {order.shipping_status || 'pending'}
+                      </span>
+                    </td>
+                    <td className="p-4">
+                      <select
+                        className="bg-transparent border border-white/10 rounded px-2 py-1 text-xs focus:outline-none focus:border-white/30"
+                        value={order.courier_name || ''}
+                        onChange={(e) => handleUpdateCourier(order.id, e.target.value)}
+                      >
+                        <option value="" className="bg-zinc-900">Assign Courier</option>
+                        <option value="G4S" className="bg-zinc-900">G4S</option>
+                        <option value="Wells Fargo" className="bg-zinc-900">Wells Fargo</option>
+                        <option value="Fargo Courier" className="bg-zinc-900">Fargo Courier</option>
+                        <option value="Sendy" className="bg-zinc-900">Sendy</option>
+                        <option value="Pickup" className="bg-zinc-900">Pickup</option>
+                      </select>
+                    </td>
+                    <td className="p-4">
+                      <select
+                        className="bg-white/5 border border-white/10 rounded px-2 py-1 text-xs focus:outline-none hover:bg-white/10"
+                        value={order.shipping_status || 'pending'}
+                        onChange={(e) => handleUpdateStatus(order.id, e.target.value)}
+                        disabled={updatingOrder === order.id}
+                      >
+                        <option value="pending" className="bg-zinc-900">Pending</option>
+                        <option value="packed" className="bg-zinc-900">Packed</option>
+                        <option value="shipped" className="bg-zinc-900">Shipped</option>
+                        <option value="delivered" className="bg-zinc-900">Delivered</option>
+                        <option value="failed" className="bg-zinc-900">Failed</option>
+                      </select>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {totalPages > 1 && (
+          <div className="p-4 border-t border-white/10 flex items-center justify-between text-sm">
+            <span className="text-white/50">Page {page} of {totalPages}</span>
+            <div className="flex gap-2">
+              <button
+                disabled={page === 1}
+                onClick={() => setPage(p => p - 1)}
+                className="p-1 rounded bg-white/5 disabled:opacity-50 hover:bg-white/10"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <button
+                disabled={page === totalPages}
+                onClick={() => setPage(p => p + 1)}
+                className="p-1 rounded bg-white/5 disabled:opacity-50 hover:bg-white/10"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function SettingsTab({ settings, onToggleMaintenance, onConfigurePaystack, onConfigureMpesa, onEditEmailTemplate }: any) {
   return (
     <div className="space-y-6">
@@ -1609,7 +2232,7 @@ function SettingsTab({ settings, onToggleMaintenance, onConfigurePaystack, onCon
                 <p className="font-medium">Maintenance Mode</p>
                 <p className="text-sm text-white/50">Temporarily disable site access</p>
               </div>
-              <button 
+              <button
                 onClick={onToggleMaintenance}
                 className={`px-4 py-2 rounded-lg text-sm font-medium ${settings.maintenanceMode ? 'bg-red-500/20 text-red-400' : 'bg-white/10 text-white/70'}`}
               >
@@ -1627,7 +2250,7 @@ function SettingsTab({ settings, onToggleMaintenance, onConfigurePaystack, onCon
                 <p className="font-medium">Paystack</p>
                 <p className="text-sm text-white/50">Card and mobile money payments</p>
               </div>
-              <button 
+              <button
                 onClick={onConfigurePaystack}
                 className={`px-3 py-1 rounded-lg text-sm ${settings.paystackSecretKey ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}
               >
@@ -1639,7 +2262,7 @@ function SettingsTab({ settings, onToggleMaintenance, onConfigurePaystack, onCon
                 <p className="font-medium">M-Pesa</p>
                 <p className="text-sm text-white/50">Mobile money integration</p>
               </div>
-              <button 
+              <button
                 onClick={onConfigureMpesa}
                 className={`px-3 py-1 rounded-lg text-sm ${settings.mpesaConsumerKey ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}
               >
@@ -1671,105 +2294,395 @@ function SettingsTab({ settings, onToggleMaintenance, onConfigurePaystack, onCon
   )
 }
 
-function ProductModal({ product, onClose, onSave }: { product: Product | null; onClose: () => void; onSave: (data: any) => void }) {
-  const [formData, setFormData] = useState({
+function ProductModal({ product, onClose, onSave }: { product: Product | null; onClose: () => void; onSave: (data: any, imageFiles: File[]) => Promise<void> }) {
+  const [formData, setFormData] = useState<Partial<Product> & { sizeInput?: string; colorInput?: string }>({
+    sizeInput: product?.variants?.find((v: any) => v.name === 'Size')?.options.join(', ') || '',
+    colorInput: product?.variants?.find((v: any) => v.name === 'Color')?.options.join(', ') || '',
     title: product?.title || '',
     description: product?.description || '',
-    price: product?.price || 0,
-    type: product?.type || 'digital' as 'digital' | 'physical',
+    price: product?.price ? product.price / 100 : 0,
+    product_type: product?.product_type || (product as any)?.type || 'digital',
+    status: product?.status || 'draft',
+    category: product?.category || '',
+    cover_images: product?.cover_images || [],
+
+    // Digital
     version: product?.version || '',
-    stock: product?.stock || 0,
+    download_file_path: product?.download_file_path || '',
+    post_payment_message: product?.post_payment_message || '',
+    supported_os: product?.supported_os || [],
+    changelog: product?.changelog || '',
+    license_notes: product?.license_notes || '',
+
+    // Physical
+    stock_quantity: product?.stock_quantity || (product as any)?.stock || 0,
     sku: product?.sku || '',
-    status: product?.status || 'active' as 'active' | 'inactive',
+    delivery_method: product?.delivery_method || '',
+    estimated_delivery_time: product?.estimated_delivery_time || '',
+    weight: product?.weight || 0,
+    dimensions: product?.dimensions || '',
   })
+
+  const [imageFiles, setImageFiles] = useState<File[]>([])
+  const [imagePreviews, setImagePreviews] = useState<string[]>(
+    product?.cover_images && product.cover_images.length > 0
+      ? product.cover_images
+      : (product as any)?.image_url ? [(product as any).image_url] : []
+  )
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    const validFiles = files.filter(f => f.size <= 3 * 1024 * 1024) // 3MB limit
+
+    if (validFiles.length < files.length) {
+      alert('Some files were ignored because they exceed 3MB')
+    }
+
+    const newPreviews = validFiles.map(f => URL.createObjectURL(f))
+    setImageFiles([...imageFiles, ...validFiles])
+    setImagePreviews([...imagePreviews, ...newPreviews])
+  }
+
+  const handleRemoveImage = (index: number) => {
+    const isNew = index >= (formData.cover_images?.length || 0)
+
+    if (isNew) {
+      const fileIndex = index - (formData.cover_images?.length || 0)
+      const newFiles = [...imageFiles]
+      newFiles.splice(fileIndex, 1)
+      setImageFiles(newFiles)
+    } else {
+      // Remove from existing
+      const existing = [...(formData.cover_images || [])]
+      existing.splice(index, 1)
+      setFormData({ ...formData, cover_images: existing })
+    }
+
+    const newPreviews = [...imagePreviews]
+    newPreviews.splice(index, 1)
+    setImagePreviews(newPreviews)
+  }
+
+  const handleSave = async () => {
+    setError('')
+
+    // VALIDATION
+    // VALIDATION
+    if (!formData.title) return setError('Title is required')
+    if ((formData.price || 0) < 0) return setError('Price must be non-negative')
+    if (imagePreviews.length === 0) return setError('At least one product image is required')
+
+    if (formData.product_type === 'digital') {
+      if (!formData.version) return setError('Version is required')
+      if (!formData.download_file_path) return setError('Download link is required')
+    } else {
+      if ((formData.stock_quantity || 0) < 0) return setError('Stock quantity cannot be negative')
+      if (!formData.sku) return setError('SKU is required')
+    }
+
+    setSaving(true)
+    try {
+      // Process variants
+      const variants = []
+      if ((formData as any).sizeInput) variants.push({ name: 'Size', options: (formData as any).sizeInput.split(',').map((s: string) => s.trim()).filter(Boolean) })
+      if ((formData as any).colorInput) variants.push({ name: 'Color', options: (formData as any).colorInput.split(',').map((s: string) => s.trim()).filter(Boolean) })
+
+      const dataToSave = {
+        ...formData,
+        variants,
+        price: (formData.price || 0) * 100 // Convert to cents for Paystack/Storage
+      }
+
+      // Ensure is_paid consistency
+      if (dataToSave.price > 0) {
+        dataToSave.is_paid = true;
+        dataToSave.is_free = false;
+      }
+
+      // Clean up temporary fields if needed, or backend will ignore them if strict. 
+      // Safe to pass extra fields usually if backend sanitizes, but cleaner to rely on onSave not checking strict types too hard.
+      // Explicitly using dataToSave.
+
+      await onSave(dataToSave, imageFiles)
+    } catch (err: any) {
+      setError(err.message || 'Failed to save')
+      setSaving(false)
+    }
+  }
+
+  const toggleOS = (os: string) => {
+    const current = formData.supported_os || []
+    if (current.includes(os)) {
+      setFormData({ ...formData, supported_os: current.filter(o => o !== os) })
+    } else {
+      setFormData({ ...formData, supported_os: [...current, os] })
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="bg-[#12121a] rounded-2xl border border-white/10 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <div className="bg-[#12121a] rounded-2xl border border-white/10 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <div className="p-6 border-b border-white/10 flex items-center justify-between">
           <h3 className="text-lg font-semibold">{product ? 'Edit Product' : 'Add Product'}</h3>
           <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/10"><X size={18} /></button>
         </div>
-        <div className="p-6 space-y-4">
+
+        <div className="p-6 space-y-6">
+          {error && <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-sm">{error}</div>}
+
+          {/* Images */}
           <div>
-            <label className="block text-sm text-white/70 mb-2">Title</label>
-            <input
-              type="text"
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50"
-            />
+            <label className="block text-sm text-white/70 mb-2">Product Images (Max 3MB)</label>
+            <div className="grid grid-cols-4 gap-4">
+              {imagePreviews.map((src, i) => (
+                <div key={i} className="relative aspect-square rounded-xl overflow-hidden group border border-white/10">
+                  <img src={src} alt="Preview" className="w-full h-full object-cover" />
+                  <button onClick={() => handleRemoveImage(i)} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
+                    <Trash2 size={20} />
+                  </button>
+                </div>
+              ))}
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="aspect-square rounded-xl bg-white/5 border-2 border-dashed border-white/20 hover:border-violet-500/50 cursor-pointer flex flex-col items-center justify-center transition-colors"
+              >
+                <Upload size={24} className="text-white/30 mb-2" />
+                <span className="text-xs text-white/50">Add Image</span>
+              </div>
+            </div>
+            <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleImageChange} className="hidden" />
           </div>
-          <div>
-            <label className="block text-sm text-white/70 mb-2">Type</label>
-            <select
-              value={formData.type}
-              onChange={(e) => setFormData({ ...formData, type: e.target.value as 'digital' | 'physical' })}
-              className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50"
-            >
-              <option value="digital">Digital</option>
-              <option value="physical">Physical</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm text-white/70 mb-2">Price (KES)</label>
-            <input
-              type="number"
-              value={formData.price}
-              onChange={(e) => setFormData({ ...formData, price: Number(e.target.value) })}
-              className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50"
-            />
-          </div>
-          {formData.type === 'digital' && (
+
+          {/* Common Fields */}
+          <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm text-white/70 mb-2">Version</label>
+              <label className="block text-sm text-white/70 mb-2">Title</label>
               <input
                 type="text"
-                value={formData.version}
-                onChange={(e) => setFormData({ ...formData, version: e.target.value })}
-                placeholder="e.g., 1.0.0"
+                value={formData.title}
+                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                 className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50"
               />
             </div>
-          )}
-          {formData.type === 'physical' && (
-            <>
-              <div>
-                <label className="block text-sm text-white/70 mb-2">Stock</label>
-                <input
-                  type="number"
-                  value={formData.stock}
-                  onChange={(e) => setFormData({ ...formData, stock: Number(e.target.value) })}
-                  className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50"
-                />
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Status</label>
+              <select
+                value={formData.status}
+                onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
+                className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50"
+              >
+                <option value="draft">Draft</option>
+                <option value="published">Published</option>
+                <option value="archived">Archived</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Price Strategy</label>
+              <div className="flex bg-white/5 p-1 rounded-xl mb-3">
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, is_free: true, is_paid: false, price: 0 })}
+                  className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition-all ${formData.is_free ? 'bg-emerald-500 text-white' : 'text-white/60 hover:text-white'}`}
+                >
+                  Free
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, is_free: false, is_paid: true })}
+                  className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition-all ${!formData.is_free ? 'bg-violet-500 text-white' : 'text-white/60 hover:text-white'}`}
+                >
+                  Paid
+                </button>
+              </div>
+
+              {!formData.is_free && (
+                <div>
+                  <label className="block text-xs text-white/50 mb-1">Amount (KES)</label>
+                  <input
+                    type="number"
+                    value={formData.price}
+                    onChange={(e) => setFormData({ ...formData, price: Number(e.target.value) })}
+                    className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50"
+                  />
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Product Type</label>
+              <div className="flex bg-white/5 p-1 rounded-xl">
+                {['digital', 'physical'].map(t => (
+                  <button
+                    key={t}
+                    onClick={() => !product && setFormData({ ...formData, product_type: t as any })} // Type cannot be changed after creation per requirements? logic check
+                    disabled={!!product}
+                    className={`flex-1 py-1.5 rounded-lg text-sm capitalize transition-all ${formData.product_type === t ? 'bg-violet-500 text-white' : 'text-white/60'}`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Type Specific Fields */}
+          {formData.product_type === 'digital' ? (
+            <div className="space-y-4 pt-4 border-t border-white/10">
+              <h4 className="font-semibold text-violet-400">Digital Product Details</h4>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-white/70 mb-2">Version (e.g. v1.0.0)</label>
+                  <input
+                    type="text"
+                    value={formData.version}
+                    onChange={(e) => setFormData({ ...formData, version: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-white/70 mb-2">
+                    {formData.is_free ? 'Download URL' : 'Secure Download Path'}
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.download_file_path}
+                    onChange={(e) => setFormData({ ...formData, download_file_path: e.target.value })}
+                    placeholder={formData.is_free ? 'https://...' : '/api/downloads/...'}
+                    className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50"
+                  />
+                </div>
               </div>
               <div>
-                <label className="block text-sm text-white/70 mb-2">SKU</label>
-                <input
-                  type="text"
-                  value={formData.sku}
-                  onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-                  className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50"
-                />
+                <label className="block text-sm text-white/70 mb-2">Platform Compatibility</label>
+                <div className="flex gap-4">
+                  {['Windows', 'macOS', 'Android'].map(os => (
+                    <label key={os} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={(formData.supported_os || []).includes(os)}
+                        onChange={() => toggleOS(os)}
+                        className="rounded bg-white/10 border-white/20"
+                      />
+                      <span className="text-sm">{os}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
-            </>
+
+              {!formData.is_free && (
+                <div>
+                  <label className="block text-sm text-white/70 mb-2">Post-payment Message</label>
+                  <input
+                    type="text"
+                    value={formData.post_payment_message}
+                    onChange={(e) => setFormData({ ...formData, post_payment_message: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50"
+                  />
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4 pt-4 border-t border-white/10">
+              <h4 className="font-semibold text-emerald-400">Physical Product Details</h4>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-white/70 mb-2">Stock Quantity</label>
+                  <input
+                    type="number"
+                    value={formData.stock_quantity}
+                    onChange={(e) => setFormData({ ...formData, stock_quantity: Number(e.target.value) })}
+                    className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-emerald-500/50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-white/70 mb-2">SKU</label>
+                  <input
+                    type="text"
+                    value={formData.sku}
+                    onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-emerald-500/50"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-white/70 mb-2">Delivery Method</label>
+                  <select
+                    value={formData.delivery_method || ''}
+                    onChange={(e) => setFormData({ ...formData, delivery_method: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-emerald-500/50"
+                  >
+                    <option value="">Select Method</option>
+                    <option value="pickup">Pickup</option>
+                    <option value="shipping">Shipping</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm text-white/70 mb-2">Est. Delivery Time</label>
+                  <input
+                    type="text"
+                    value={formData.estimated_delivery_time}
+                    onChange={(e) => setFormData({ ...formData, estimated_delivery_time: e.target.value })}
+                    placeholder="e.g. 3-5 days"
+                    className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-emerald-500/50"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-white/70 mb-2">Available Sizes (comma separated)</label>
+                  <input
+                    type="text"
+                    value={(formData as any).sizeInput || ''}
+                    onChange={(e) => setFormData({ ...formData, sizeInput: e.target.value })}
+                    placeholder="S, M, L, XL"
+                    className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-emerald-500/50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-white/70 mb-2">Available Colors (comma separated)</label>
+                  <input
+                    type="text"
+                    value={(formData as any).colorInput || ''}
+                    onChange={(e) => setFormData({ ...formData, colorInput: e.target.value })}
+                    placeholder="Red, Blue, Black"
+                    className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-emerald-500/50"
+                  />
+                </div>
+              </div>
+            </div>
           )}
+
           <div>
             <label className="block text-sm text-white/70 mb-2">Description</label>
             <textarea
-              value={formData.description}
+              value={formData.description || ''}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               rows={3}
               className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50 resize-none"
             />
           </div>
         </div>
+
         <div className="p-6 border-t border-white/10 flex items-center gap-3">
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10">Cancel</button>
-          <button onClick={() => onSave(formData)} className="flex-1 py-2.5 rounded-xl bg-violet-500 hover:bg-violet-600 font-medium">Save</button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 py-2.5 rounded-xl bg-violet-500 hover:bg-violet-600 font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {saving && <RefreshCw size={16} className="animate-spin" />}
+            Save Product
+          </button>
         </div>
       </div>
-    </div>
+    </div >
   )
 }
 
@@ -1777,15 +2690,18 @@ function MixtapeModal({ mixtape, onClose, onSave }: { mixtape: Mixtape | null; o
   const [formData, setFormData] = useState({
     title: mixtape?.title || '',
     description: mixtape?.description || '',
-    coverImage: mixtape?.coverImage || '',
-    mixLink: mixtape?.mixLink || '',
+    coverImage: mixtape?.cover_image || (mixtape as any)?.coverImage || '',
+    mixLink: (mixtape as any)?.mixLink || (mixtape as any)?.audio_url || '',
     genre: mixtape?.genre || '',
-    price: mixtape?.price || 0,
+    price: mixtape?.price ? mixtape.price / 100 : 0,
     isFree: mixtape?.isFree ?? true,
     status: mixtape?.status || 'active' as 'active' | 'inactive',
+    audio_download_url: mixtape?.audio_download_url || '',
+    video_download_url: mixtape?.video_download_url || '',
+    embed_url: mixtape?.embed_url || ''
   })
   const [imageFile, setImageFile] = useState<File | null>(null)
-  const [imagePreview, setImagePreview] = useState<string>(mixtape?.coverImage || '')
+  const [imagePreview, setImagePreview] = useState<string>(mixtape?.cover_image || (mixtape as any)?.coverImage || '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -1806,7 +2722,11 @@ function MixtapeModal({ mixtape, onClose, onSave }: { mixtape: Mixtape | null; o
     setSaving(true)
     setError('')
     try {
-      await onSave(formData, imageFile)
+      const dataToSave = {
+        ...formData,
+        price: (formData.price || 0) * 100
+      }
+      await onSave(dataToSave, imageFile)
     } catch (err: any) {
       setError(err.message || 'Failed to save')
       setSaving(false)
@@ -1826,7 +2746,7 @@ function MixtapeModal({ mixtape, onClose, onSave }: { mixtape: Mixtape | null; o
         <div className="p-6 space-y-4">
           <div>
             <label className="block text-sm text-white/70 mb-2">Cover Image</label>
-            <div 
+            <div
               onClick={() => fileInputRef.current?.click()}
               className="w-full aspect-square max-w-[200px] mx-auto rounded-xl bg-white/5 border-2 border-dashed border-white/20 hover:border-fuchsia-500/50 cursor-pointer flex items-center justify-center overflow-hidden"
             >
@@ -1850,16 +2770,54 @@ function MixtapeModal({ mixtape, onClose, onSave }: { mixtape: Mixtape | null; o
               className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-fuchsia-500/50"
             />
           </div>
-          <div>
-            <label className="block text-sm text-white/70 mb-2">Mix Link (YouTube, Audiomack, Mixcloud, etc.)</label>
-            <input
-              type="url"
-              value={formData.mixLink}
-              onChange={(e) => setFormData({ ...formData, mixLink: e.target.value })}
-              placeholder="https://..."
-              className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-fuchsia-500/50"
-            />
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Audio Download Link</label>
+              <input
+                type="url"
+                value={formData.audio_download_url}
+                onChange={(e) => setFormData({ ...formData, audio_download_url: e.target.value })}
+                placeholder="https://..."
+                className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-fuchsia-500/50"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Video Download Link</label>
+              <input
+                type="url"
+                value={formData.video_download_url}
+                onChange={(e) => setFormData({ ...formData, video_download_url: e.target.value })}
+                placeholder="https://..."
+                className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-fuchsia-500/50"
+              />
+            </div>
           </div>
+
+          <div>
+            <label className="block text-sm text-white/70 mb-2">Embed Code / Link</label>
+            <textarea
+              value={formData.embed_url}
+              onChange={(e) => setFormData({ ...formData, embed_url: e.target.value })}
+              placeholder={'<iframe src="..." ...></iframe> or https://...'}
+              rows={2}
+              className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-fuchsia-500/50 resize-none font-mono text-xs"
+            />
+            {formData.embed_url && (
+              <div className="mt-2 p-2 rounded-lg bg-black/50 overflow-hidden">
+                <p className="text-xs text-white/50 mb-2">Preview:</p>
+                <div
+                  className="w-full"
+                  dangerouslySetInnerHTML={{
+                    __html: formData.embed_url.includes('<iframe') || formData.embed_url.includes('<embed')
+                      ? formData.embed_url
+                      : `<iframe src="${formData.embed_url}" width="100%" height="200" frameborder="0" allowfullscreen></iframe>`
+                  }}
+                />
+              </div>
+            )}
+          </div>
+
           <div>
             <label className="block text-sm text-white/70 mb-2">Genre</label>
             <input
@@ -1907,14 +2865,20 @@ function MixtapeModal({ mixtape, onClose, onSave }: { mixtape: Mixtape | null; o
             </div>
           )}
         </div>
-        <div className="p-6 border-t border-white/10 flex items-center gap-3">
-          <button onClick={onClose} disabled={saving} className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-50">Cancel</button>
-          <button 
-            onClick={handleSave} 
-            disabled={saving}
-            className="flex-1 py-2.5 rounded-xl bg-fuchsia-500 hover:bg-fuchsia-600 font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+        <div className="p-6 border-t border-white/10 flex justify-end gap-3">
+          <button
+            onClick={onClose}
+            className="px-6 py-2 rounded-xl text-white/70 hover:text-white hover:bg-white/5 transition-all"
           >
-            {saving ? <RefreshCw size={16} className="animate-spin" /> : null} {saving ? 'Saving...' : 'Save'}
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-6 py-2 rounded-xl bg-gradient-to-r from-fuchsia-600 to-purple-600 text-white font-semibold hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
+          >
+            {saving && <RefreshCw size={16} className="animate-spin" />}
+            Save Mixtape
           </button>
         </div>
       </div>
@@ -1974,7 +2938,7 @@ function TrackModal({ track, onClose, onSave }: { track: MusicPoolTrack | null; 
         <div className="p-6 space-y-4">
           <div>
             <label className="block text-sm text-white/70 mb-2">Cover Image</label>
-            <div 
+            <div
               onClick={() => fileInputRef.current?.click()}
               className="w-24 h-24 rounded-xl bg-white/5 border-2 border-dashed border-white/20 hover:border-amber-500/50 cursor-pointer flex items-center justify-center overflow-hidden"
             >
@@ -2054,8 +3018,8 @@ function TrackModal({ track, onClose, onSave }: { track: MusicPoolTrack | null; 
         </div>
         <div className="p-6 border-t border-white/10 flex items-center gap-3">
           <button onClick={onClose} disabled={saving} className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-50">Cancel</button>
-          <button 
-            onClick={handleSave} 
+          <button
+            onClick={handleSave}
             disabled={saving}
             className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-black font-medium disabled:opacity-50 flex items-center justify-center gap-2"
           >
@@ -2100,8 +3064,8 @@ function TelegramTokenModal({ currentToken, onClose, onSave }: { currentToken: s
         </div>
         <div className="p-6 border-t border-white/10 flex items-center gap-3">
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10">Cancel</button>
-          <button 
-            onClick={handleSave} 
+          <button
+            onClick={handleSave}
             disabled={saving}
             className="flex-1 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 font-medium flex items-center justify-center gap-2 disabled:opacity-50"
           >
@@ -2154,11 +3118,10 @@ function ChannelManagementModal({ channels, onClose, onSave }: { channels: Teleg
                   <p className="text-xs text-white/50">{channel.chatId}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`px-2 py-0.5 rounded text-xs ${
-                    channel.tier === 'unlimited' ? 'bg-amber-500/20 text-amber-400' :
+                  <span className={`px-2 py-0.5 rounded text-xs ${channel.tier === 'unlimited' ? 'bg-amber-500/20 text-amber-400' :
                     channel.tier === 'pro' ? 'bg-violet-500/20 text-violet-400' :
-                    'bg-white/10 text-white/70'
-                  }`}>{channel.tier}</span>
+                      'bg-white/10 text-white/70'
+                    }`}>{channel.tier}</span>
                   <button onClick={() => removeChannel(channel.id)} className="p-1.5 rounded-lg hover:bg-red-500/10 text-red-400">
                     <Trash2 size={14} />
                   </button>
@@ -2200,15 +3163,15 @@ function ChannelManagementModal({ channels, onClose, onSave }: { channels: Teleg
           </div>
         </div>
         <div className="p-6 border-t border-white/10 flex items-center gap-3">
-            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10">Cancel</button>
-            <button 
-              onClick={handleSave} 
-              disabled={saving}
-              className="flex-1 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 font-medium disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {saving ? <RefreshCw size={16} className="animate-spin" /> : null} {saving ? 'Saving...' : 'Save'}
-            </button>
-          </div>
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10">Cancel</button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {saving ? <RefreshCw size={16} className="animate-spin" /> : null} {saving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -2216,7 +3179,7 @@ function ChannelManagementModal({ channels, onClose, onSave }: { channels: Teleg
 
 function PaymentConfigModal({ type, settings, onClose, onSave }: { type: 'paystack' | 'mpesa'; settings: SiteSettings; onClose: () => void; onSave: (data: any) => Promise<void> }) {
   const [formData, setFormData] = useState(
-    type === 'paystack' 
+    type === 'paystack'
       ? { paystackPublicKey: settings.paystackPublicKey, paystackSecretKey: settings.paystackSecretKey }
       : { mpesaConsumerKey: settings.mpesaConsumerKey, mpesaConsumerSecret: settings.mpesaConsumerSecret }
   )
@@ -2285,16 +3248,16 @@ function PaymentConfigModal({ type, settings, onClose, onSave }: { type: 'paysta
             </>
           )}
         </div>
-          <div className="p-6 border-t border-white/10 flex items-center gap-3">
-            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10">Cancel</button>
-            <button 
-              onClick={handleSave} 
-              disabled={saving}
-              className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 font-medium disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {saving ? <RefreshCw size={16} className="animate-spin" /> : null} {saving ? 'Saving...' : 'Save'}
-            </button>
-          </div>
+        <div className="p-6 border-t border-white/10 flex items-center gap-3">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-white/5 hover:bg-white/10">Cancel</button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {saving ? <RefreshCw size={16} className="animate-spin" /> : null} {saving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -2344,6 +3307,112 @@ function EmailTemplateModal({ template, onClose }: { template: string; onClose: 
     </div>
   )
 }
+
+function PlanModal({ plan, onClose, onSave }: { plan: Plan | null; onClose: () => void; onSave: (data: any) => Promise<void> }) {
+  const [formData, setFormData] = useState({
+    name: plan?.name || '',
+    price: plan?.price ? plan.price / 100 : 0, // Display Major
+    duration: plan?.duration || 'month',
+    features: plan?.features || [],
+    description: plan?.description || '',
+    tier: plan?.tier || 'basic'
+  })
+  const [featureInput, setFeatureInput] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleAddFeature = () => {
+    if (featureInput.trim()) {
+      setFormData(prev => ({ ...prev, features: [...prev.features, featureInput.trim()] }))
+      setFeatureInput('')
+    }
+  }
+
+  const handleRemoveFeature = (index: number) => {
+    setFormData(prev => ({ ...prev, features: prev.features.filter((_, i) => i !== index) }))
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      // Save Cents
+      await onSave({
+        ...formData,
+        price: (formData.price || 0) * 100
+      })
+    } catch (e: any) {
+      setError(e.message)
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <div className="bg-[#12121a] rounded-2xl border border-white/10 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b border-white/10 flex items-center justify-between">
+          <h3 className="text-lg font-semibold">{plan ? 'Edit Plan' : 'Create Plan'}</h3>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/10"><X size={18} /></button>
+        </div>
+        <div className="p-6 space-y-4">
+          {error && <div className="p-3 bg-red-500/10 text-red-400 text-sm rounded-lg">{error}</div>}
+
+          <div>
+            <label className="block text-sm text-white/70 mb-2">Plan Name</label>
+            <input type="text" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-white outline-none focus:border-violet-500/50" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Price (KES)</label>
+              <input type="number" value={formData.price} onChange={e => setFormData({ ...formData, price: Number(e.target.value) })} className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-white outline-none focus:border-violet-500/50" />
+            </div>
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Duration</label>
+              <select value={formData.duration} onChange={e => setFormData({ ...formData, duration: e.target.value })} className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-white outline-none focus:border-violet-500/50">
+                <option value="month">Monthly</option>
+                <option value="year">Yearly</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm text-white/70 mb-2">Features</label>
+            <div className="flex gap-2 mb-2">
+              <input type="text" value={featureInput} onChange={e => setFeatureInput(e.target.value)} placeholder="Add feature..." className="flex-1 px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-white outline-none focus:border-violet-500/50" onKeyDown={e => e.key === 'Enter' && handleAddFeature()} />
+              <button onClick={handleAddFeature} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-white"><Plus size={18} /></button>
+            </div>
+            <div className="space-y-2">
+              {formData.features.map((f, i) => (
+                <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-white/5 text-sm">
+                  <span>{f}</span>
+                  <button onClick={() => handleRemoveFeature(i)} className="text-white/40 hover:text-red-400"><X size={14} /></button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm text-white/70 mb-2">Tier Identifier</label>
+            <select value={formData.tier} onChange={e => setFormData({ ...formData, tier: e.target.value })} className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-white outline-none focus:border-violet-500/50">
+              <option value="basic">Basic</option>
+              <option value="pro">Pro</option>
+              <option value="unlimited">Unlimited</option>
+            </select>
+            <p className="text-xs text-white/40 mt-1">Used for system logic (e.g. Telegram channel access)</p>
+          </div>
+        </div>
+        <div className="p-6 border-t border-white/10 flex justify-end gap-3">
+          <button onClick={onClose} className="px-6 py-2 rounded-xl text-white/60 hover:text-white">Cancel</button>
+          <button onClick={handleSave} disabled={saving} className="px-6 py-2 rounded-xl bg-violet-500 text-white font-medium hover:bg-violet-600 disabled:opacity-50">
+            {saving ? 'Saving...' : 'Save Plan'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
 
 export default function AdminPage() {
   return (

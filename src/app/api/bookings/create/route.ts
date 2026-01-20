@@ -7,17 +7,18 @@ const ADMIN_WHATSAPP = '+254789783258'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { 
-      customer_name, 
-      email, 
-      phone, 
-      event_type, 
-      event_date, 
+    const {
+      customer_name,
+      email,
+      phone,
+      event_type,
+      event_date,
       event_time,
       location,
       notes,
       estimated_budget,
-      tipjar_amount 
+      tipjar_amount,
+      attachments
     } = body
 
     if (!customer_name || !email || !phone || !event_date || !event_time || !location) {
@@ -38,6 +39,7 @@ export async function POST(request: NextRequest) {
       notes: notes || null,
       estimated_budget: estimated_budget || null,
       tipjar_amount: tipjar_amount || 0,
+      attachments: attachments || [],
       status: 'pending',
       createdAt: new Date().toISOString()
     })
@@ -168,7 +170,7 @@ async function sendWhatsAppNotification(booking: any) {
   const TWILIO_SID = process.env.TWILIO_ACCOUNT_SID
   const TWILIO_TOKEN = process.env.TWILIO_AUTH_TOKEN
   const TWILIO_WHATSAPP = process.env.TWILIO_WHATSAPP_FROM
-  
+
   if (!TWILIO_SID || !TWILIO_TOKEN || !TWILIO_WHATSAPP) return
 
   const message = `
@@ -202,7 +204,7 @@ Notes: ${booking.notes || 'None'}
 async function sendTelegramNotification(booking: any) {
   const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
   const CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID
-  
+
   if (!BOT_TOKEN || !CHAT_ID) return
 
   const message = `

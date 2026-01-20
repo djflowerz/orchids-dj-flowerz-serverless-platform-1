@@ -4,12 +4,13 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { motion } from 'framer-motion'
-import { Search, Download, Package, ShoppingCart, Star, Monitor, Apple, Smartphone, Filter } from 'lucide-react'
+import { Search, Download, Package, ShoppingCart, Star, Monitor, Apple, Smartphone, Filter, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import { useCart } from '@/context/CartContext'
 import { Product } from '@/lib/types'
 import { formatCurrency } from '@/lib/utils'
-import { supabase } from '@/lib/supabase'
+import { db } from '@/lib/firebase'
+import { collection, query, where, getDocs } from 'firebase/firestore'
 
 const categories = ['All', 'Apparel', 'Samples', 'Software', 'Accessories']
 const types = ['all', 'digital', 'physical']
@@ -34,41 +35,78 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
   const [sortBy, setSortBy] = useState('Newest')
   const [products, setProducts] = useState<ProductWithRating[]>([])
   const [showFilters, setShowFilters] = useState(false)
+
+  // Pending filter states
+  const [pendingProductType, setPendingProductType] = useState<'all' | 'digital' | 'physical'>('all')
+  const [pendingOsFilter, setPendingOsFilter] = useState('All')
+  const [pendingPriceFilter, setPendingPriceFilter] = useState('All')
+  const [pendingRatingFilter, setPendingRatingFilter] = useState('All')
+
   const { addToCart } = useCart()
+
+  const toggleFilters = () => {
+    if (!showFilters) {
+      setPendingProductType(productType)
+      setPendingOsFilter(osFilter)
+      setPendingPriceFilter(priceFilter)
+      setPendingRatingFilter(ratingFilter)
+    }
+    setShowFilters(!showFilters)
+  }
+
+  const applyFilters = () => {
+    setProductType(pendingProductType)
+    setOsFilter(pendingOsFilter)
+    setPriceFilter(pendingPriceFilter)
+    setRatingFilter(pendingRatingFilter)
+    setShowFilters(false)
+  }
 
   useEffect(() => {
     async function fetchProductsWithRatings() {
-      const productIds = initialProducts.map(p => p.id)
-      
-      const { data: allReviews } = await supabase
-        .from('product_reviews')
-        .select('product_id, rating')
-        .in('product_id', productIds)
-      
-      const reviewsByProduct: Record<string, number[]> = {}
-      ;(allReviews || []).forEach(r => {
-        if (!reviewsByProduct[r.product_id]) {
-          reviewsByProduct[r.product_id] = []
+      try {
+        const productIds = initialProducts.map(p => p.id)
+
+        if (productIds.length === 0) {
+          setProducts([])
+          return
         }
-        reviewsByProduct[r.product_id].push(r.rating)
-      })
-      
-      const productsWithRatings = initialProducts.map(product => {
-        const ratings = reviewsByProduct[product.id] || []
-        const average = ratings.length > 0 
-          ? ratings.reduce((sum, r) => sum + r, 0) / ratings.length 
-          : 0
-        
-        return {
-          ...product,
-          average_rating: average,
-          review_count: ratings.length
-        }
-      })
-      
-      setProducts(productsWithRatings)
+
+        const q = query(
+          collection(db, 'product_reviews'),
+          where('product_id', 'in', productIds)
+        )
+        const snapshot = await getDocs(q)
+
+        const reviewsByProduct: Record<string, number[]> = {}
+        snapshot.docs.forEach(doc => {
+          const data = doc.data()
+          if (!reviewsByProduct[data.product_id]) {
+            reviewsByProduct[data.product_id] = []
+          }
+          reviewsByProduct[data.product_id].push(data.rating)
+        })
+
+        const productsWithRatings = initialProducts.map(product => {
+          const ratings = reviewsByProduct[product.id] || []
+          const average = ratings.length > 0
+            ? ratings.reduce((sum, r) => sum + r, 0) / ratings.length
+            : 0
+
+          return {
+            ...product,
+            average_rating: average,
+            review_count: ratings.length
+          }
+        })
+
+        setProducts(productsWithRatings)
+      } catch (error) {
+        console.error('Error fetching product ratings:', error)
+        setProducts(initialProducts.map(p => ({ ...p, average_rating: 0, review_count: 0 })))
+      }
     }
-    
+
     if (initialProducts.length > 0) {
       fetchProductsWithRatings()
     } else {
@@ -79,9 +117,13 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
   const filteredProducts = products.filter(p => {
     const matchesSearch = p.title.toLowerCase().includes(search.toLowerCase())
     const matchesCategory = category === 'All' || p.category === category
-    const matchesType = productType === 'all' || p.product_type === productType
+
+    const pType = p.product_type || (p as any).type || 'digital'
+    const matchesType = productType === 'all' || pType === productType
+
+    // ... rest of filters
     const matchesOs = osFilter === 'All' || (p.supported_os && p.supported_os.includes(osFilter))
-    const matchesPrice = priceFilter === 'All' || 
+    const matchesPrice = priceFilter === 'All' ||
       (priceFilter === 'Free' && (p.is_free || !p.is_paid)) ||
       (priceFilter === 'Paid' && p.is_paid && !p.is_free)
     const matchesRating = ratingFilter === 'All' ||
@@ -103,6 +145,8 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     }
   })
+
+
 
   const handleQuickAdd = (e: React.MouseEvent, product: Product) => {
     e.preventDefault()
@@ -147,27 +191,26 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
             className="w-full pl-11 pr-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-white/40 focus:outline-none focus:border-cyan-500/50"
           />
         </div>
-        
-<button
-            onClick={() => setShowFilters(!showFilters)}
-            className={`px-4 py-2 rounded-xl flex items-center gap-2 transition-all ${
-              showFilters ? 'bg-cyan-500 text-white' : 'bg-white/5 text-white/70 hover:bg-white/10'
-            }`}
-          >
-            <Filter size={18} />
-            Filters
-          </button>
 
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-            className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white focus:outline-none focus:border-cyan-500/50"
-          >
-            {sortOptions.map((opt) => (
-              <option key={opt} value={opt} className="bg-zinc-900">{opt}</option>
-            ))}
-          </select>
-        </div>
+        <button
+          onClick={toggleFilters}
+          className={`px-4 py-2 rounded-xl flex items-center gap-2 transition-all ${showFilters ? 'bg-cyan-500 text-white' : 'bg-white/5 text-white/70 hover:bg-white/10'
+            }`}
+        >
+          <Filter size={18} />
+          Filters
+        </button>
+
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value)}
+          className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white focus:outline-none focus:border-cyan-500/50"
+        >
+          {sortOptions.map((opt) => (
+            <option key={opt} value={opt} className="bg-zinc-900">{opt}</option>
+          ))}
+        </select>
+      </div>
 
       {showFilters && (
         <motion.div
@@ -180,12 +223,11 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
             {types.map((t) => (
               <button
                 key={t}
-                onClick={() => setProductType(t as typeof productType)}
-                className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all flex items-center gap-1 ${
-                  productType === t
-                    ? 'bg-cyan-500 text-white'
-                    : 'bg-white/5 text-white/70 hover:bg-white/10'
-                }`}
+                onClick={() => setPendingProductType(t as typeof productType)}
+                className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all flex items-center gap-1 ${pendingProductType === t
+                  ? 'bg-cyan-500 text-white'
+                  : 'bg-white/5 text-white/70 hover:bg-white/10'
+                  }`}
               >
                 {t === 'digital' ? <Download size={12} /> : t === 'physical' ? <Package size={12} /> : null}
                 {t === 'all' ? 'All' : t === 'digital' ? 'Digital' : 'Physical'}
@@ -198,12 +240,11 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
             {osFilters.map((os) => (
               <button
                 key={os}
-                onClick={() => setOsFilter(os)}
-                className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all flex items-center gap-1 ${
-                  osFilter === os
-                    ? 'bg-fuchsia-500 text-white'
-                    : 'bg-white/5 text-white/70 hover:bg-white/10'
-                }`}
+                onClick={() => setPendingOsFilter(os)}
+                className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all flex items-center gap-1 ${pendingOsFilter === os
+                  ? 'bg-fuchsia-500 text-white'
+                  : 'bg-white/5 text-white/70 hover:bg-white/10'
+                  }`}
               >
                 {os !== 'All' && getOsIcon(os)}
                 {os}
@@ -216,12 +257,11 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
             {priceFilters.map((p) => (
               <button
                 key={p}
-                onClick={() => setPriceFilter(p)}
-                className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                  priceFilter === p
-                    ? 'bg-green-500 text-white'
-                    : 'bg-white/5 text-white/70 hover:bg-white/10'
-                }`}
+                onClick={() => setPendingPriceFilter(p)}
+                className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${pendingPriceFilter === p
+                  ? 'bg-green-500 text-white'
+                  : 'bg-white/5 text-white/70 hover:bg-white/10'
+                  }`}
               >
                 {p}
               </button>
@@ -233,17 +273,26 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
             {ratingFilters.map((r) => (
               <button
                 key={r}
-                onClick={() => setRatingFilter(r)}
-                className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all flex items-center gap-1 ${
-                  ratingFilter === r
-                    ? 'bg-yellow-500 text-black'
-                    : 'bg-white/5 text-white/70 hover:bg-white/10'
-                }`}
+                onClick={() => setPendingRatingFilter(r)}
+                className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all flex items-center gap-1 ${pendingRatingFilter === r
+                  ? 'bg-yellow-500 text-black'
+                  : 'bg-white/5 text-white/70 hover:bg-white/10'
+                  }`}
               >
                 {r !== 'All' && <Star size={12} />}
                 {r}
               </button>
             ))}
+          </div>
+
+          <div className="pt-2 flex justify-end">
+            <button
+              onClick={applyFilters}
+              className="px-6 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-white font-semibold text-sm transition-all flex items-center gap-2"
+            >
+              <Check size={16} />
+              Apply Filters
+            </button>
           </div>
         </motion.div>
       )}
@@ -253,11 +302,10 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
           <button
             key={c}
             onClick={() => setCategory(c)}
-            className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
-              category === c
-                ? 'bg-white text-black'
-                : 'bg-white/5 text-white/70 hover:bg-white/10'
-            }`}
+            className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${category === c
+              ? 'bg-white text-black'
+              : 'bg-white/5 text-white/70 hover:bg-white/10'
+              }`}
           >
             {c}
           </button>
@@ -270,98 +318,112 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {filteredProducts.map((product, i) => (
-            <motion.div
-              key={product.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.05 }}
-            >
-              <Link href={`/store/${product.id}`} className="group block">
-                <div className="relative aspect-square rounded-2xl overflow-hidden mb-4 bg-white/5">
-                  <Image
-                    src={product.image_url || 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=500'}
-                    alt={product.title}
-                    fill
-                    className="object-cover group-hover:scale-110 transition-transform duration-500"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+          {filteredProducts.map((product, i) => {
+            const pType = product.product_type || (product as any).type || 'digital'
+            const stock = product.stock_quantity !== undefined ? product.stock_quantity : (product as any).stock
+            const image = product.cover_images?.[0] || product.image_url || 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=500'
+            const version = product.version || (product as any).version_number
 
-                  <div className="absolute top-3 left-3 flex flex-col gap-2">
-                    <div className="px-3 py-1 rounded-full bg-black/50 backdrop-blur-sm text-white text-xs font-medium flex items-center gap-1">
-                      {product.product_type === 'digital' ? (
-                        <>
-                          <Download size={12} />
-                          Digital
-                        </>
-                      ) : (
-                        <>
-                          <Package size={12} />
-                          Physical
-                        </>
+            return (
+              <motion.div
+                key={product.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.05 }}
+              >
+                <Link href={`/store/${product.id}`} className="group block">
+                  <div className="relative aspect-square rounded-2xl overflow-hidden mb-4 bg-white/5">
+                    <Image
+                      src={image}
+                      alt={product.title}
+                      fill
+                      className="object-cover group-hover:scale-110 transition-transform duration-500"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+
+                    <div className="absolute top-3 left-3 flex flex-col gap-2">
+                      <div className="px-3 py-1 rounded-full bg-black/50 backdrop-blur-sm text-white text-xs font-medium flex items-center gap-1">
+                        {pType === 'digital' ? (
+                          <>
+                            <Download size={12} />
+                            Digital
+                          </>
+                        ) : (
+                          <>
+                            <Package size={12} />
+                            Physical
+                          </>
+                        )}
+                      </div>
+                      {product.supported_os && product.supported_os.length > 0 && (
+                        <div className="flex gap-1">
+                          {product.supported_os.map((os) => (
+                            <span key={os} className="px-2 py-1 rounded-full bg-black/50 backdrop-blur-sm text-white text-xs">
+                              {getOsIcon(os)}
+                            </span>
+                          ))}
+                        </div>
                       )}
                     </div>
-                    {product.supported_os && product.supported_os.length > 0 && (
-                      <div className="flex gap-1">
-                        {product.supported_os.map((os) => (
-                          <span key={os} className="px-2 py-1 rounded-full bg-black/50 backdrop-blur-sm text-white text-xs">
-                            {getOsIcon(os)}
-                          </span>
-                        ))}
+
+                    {(product.is_free || (product.price || 0) === 0) ? (
+                      <div className="absolute top-3 right-3 px-3 py-1 rounded-full bg-green-500/80 text-white text-xs font-semibold">
+                        Free
                       </div>
+                    ) : (
+                      <div className="absolute top-3 right-3 px-3 py-1 rounded-full bg-violet-500/80 text-white text-xs font-semibold">
+                        Paid
+                      </div>
+                    )}
+
+
+                  </div>
+
+                  <h3 className="text-white font-semibold text-lg mb-1 group-hover:text-cyan-400 transition-colors">
+                    {product.title}
+                  </h3>
+
+                  <div className="flex items-center gap-2 mb-2">
+                    {product.average_rating > 0 ? (
+                      <>
+                        {renderStars(Math.round(product.average_rating))}
+                        <span className="text-white/40 text-xs">({product.review_count})</span>
+                      </>
+                    ) : (
+                      <span className="text-white/30 text-xs">No reviews yet</span>
                     )}
                   </div>
 
-                  {(product.is_free || !product.is_paid) && (
-                    <div className="absolute top-3 right-3 px-3 py-1 rounded-full bg-green-500/80 text-white text-xs font-semibold">
-                      Free
-                    </div>
-                  )}
+                  <p className="text-white/50 text-sm mb-2 line-clamp-1">
+                    {product.category}
+                    {version && ` • v${version}`}
+                  </p>
 
-                  {product.is_paid && !product.is_free && (
-                    <button
-                      onClick={(e) => handleQuickAdd(e, product)}
-                      className="absolute bottom-3 right-3 p-3 rounded-full bg-cyan-500 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-cyan-600"
-                    >
-                      <ShoppingCart size={18} />
-                    </button>
-                  )}
-                </div>
-
-                <h3 className="text-white font-semibold text-lg mb-1 group-hover:text-cyan-400 transition-colors">
-                  {product.title}
-                </h3>
-                
-                <div className="flex items-center gap-2 mb-2">
-                  {product.average_rating > 0 ? (
-                    <>
-                      {renderStars(Math.round(product.average_rating))}
-                      <span className="text-white/40 text-xs">({product.review_count})</span>
-                    </>
-                  ) : (
-                    <span className="text-white/30 text-xs">No reviews yet</span>
-                  )}
-                </div>
-
-                <p className="text-white/50 text-sm mb-2 line-clamp-1">
-                  {product.category}
-                  {product.version_number && ` • v${product.version_number}`}
-                </p>
-
-                <div className="flex items-center justify-between">
-                  <span className="text-cyan-400 font-semibold">
-                    {product.is_free || !product.is_paid ? 'Free' : formatCurrency(product.price)}
-                  </span>
-
-                  {product.product_type === 'physical' && (
-                    <span className={`text-xs ${product.stock_quantity > 0 ? 'text-white/40' : 'text-red-400'}`}>
-                      {product.stock_quantity > 0 ? `${product.stock_quantity} in stock` : 'Out of stock'}
+                  {pType === 'physical' && (
+                    <span className={`text-xs block mb-2 ${(stock || 0) > 0 ? 'text-white/40' : 'text-red-400'}`}>
+                      {(stock || 0) > 0 ? `${stock} in stock` : 'Out of stock'}
                     </span>
                   )}
-                </div>
-              </Link>
-            </motion.div>
-          ))}
+
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-cyan-400 font-bold text-lg">
+                      {(product.is_free || (product.price || 0) === 0) ? 'Free' : formatCurrency(product.price)}
+                    </span>
+
+                    {(product.is_paid || (product.price || 0) > 0) && !product.is_free && (
+                      <button
+                        onClick={(e) => handleQuickAdd(e, product)}
+                        className="px-4 py-2 rounded-full bg-cyan-500/10 border border-cyan-500/50 text-cyan-400 hover:bg-cyan-500 hover:text-white transition-all flex items-center gap-2 text-sm font-semibold"
+                      >
+                        <ShoppingCart size={16} />
+                        Add
+                      </button>
+                    )}
+                  </div>
+                </Link>
+              </motion.div>
+            )
+          })}
         </div>
       )}
     </div>
