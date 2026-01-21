@@ -15,7 +15,8 @@ import {
   getRedirectResult,
   RecaptchaVerifier,
   signInWithPhoneNumber,
-  ConfirmationResult
+  ConfirmationResult,
+  sendEmailVerification
 } from 'firebase/auth'
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore'
 import { toast } from 'sonner'
@@ -109,27 +110,77 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter()
 
   useEffect(() => {
+    let isHandlingRedirect = true
+
     const handleRedirectResult = async () => {
       try {
+        console.log('[AuthContext] Checking for redirect result...')
         const result = await getRedirectResult(auth)
+
         if (result) {
+          console.log('[AuthContext] Redirect result found:', result.user.email)
+          toast.loading('Completing sign-in...')
+
           const userProfile = await getUserProfile(result.user)
+
           if (userProfile) {
+            console.log('[AuthContext] User profile loaded:', userProfile.email)
             setUser(userProfile)
+
             const userDocRef = doc(db, 'users', result.user.uid)
             await updateDoc(userDocRef, { last_login: new Date().toISOString() })
-            router.push(userProfile.role === 'admin' ? '/admin' : '/dashboard')
+
+            setLoading(false)
+            toast.success(`Welcome back, ${userProfile.name}!`)
+            router.push(userProfile.role === 'admin' ? '/admin' : '/')
+          } else {
+            console.error('[AuthContext] Failed to get user profile')
+            toast.error('Failed to load user profile. Please try again.')
+            setLoading(false)
           }
+        } else {
+          console.log('[AuthContext] No redirect result found')
         }
       } catch (error) {
-        console.error('Redirect result error:', error)
+        console.error('[AuthContext] Redirect result error:', error)
+        toast.error('Sign-in failed. Please try again.')
+        setLoading(false)
+      } finally {
+        isHandlingRedirect = false
       }
     }
 
     handleRedirectResult()
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+
+      console.log('[AuthContext] Auth state changed:', firebaseUser?.email || 'null')
+
       if (firebaseUser) {
+        // Strict Email Verification Check
+        if (!firebaseUser.emailVerified && firebaseUser.providerData.some(p => p.providerId === 'password')) {
+          console.log('[AuthContext] User email not verified. Blocking access.')
+          toast.error('Please verify your email address to access your account.', {
+            duration: 6000,
+            action: {
+              label: 'Resend',
+              onClick: async () => {
+                try {
+                  await sendEmailVerification(firebaseUser)
+                  toast.success('Verification email sent!')
+                } catch (e) {
+                  console.error('Resend error', e)
+                  toast.error('Failed to resend verfication email')
+                }
+              }
+            }
+          })
+          await firebaseSignOut(auth)
+          setUser(null)
+          setLoading(false)
+          return
+        }
+
         const userProfile = await getUserProfile(firebaseUser)
         setUser(userProfile)
       } else {
@@ -156,7 +207,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false)
         return {
           error: null,
-          redirectTo: userProfile.role === 'admin' ? '/admin' : '/dashboard'
+          redirectTo: userProfile.role === 'admin' ? '/admin' : '/'
         }
       }
 
@@ -178,6 +229,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signUp(email: string, password: string, name: string) {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password)
+
+      // Send email verification with redirect URL
+      try {
+        const actionCodeSettings = {
+          url: window.location.origin + '/login',
+          handleCodeInApp: false
+        }
+        await sendEmailVerification(userCredential.user, actionCodeSettings)
+        toast.success('Verification email sent! Please check your inbox.')
+      } catch (emailError) {
+        console.error('Failed to send verification email:', emailError)
+        toast.warning('Account created but verification email failed to send.')
+      }
 
       const userDocRef = doc(db, 'users', userCredential.user.uid)
       await setDoc(userDocRef, {
@@ -260,6 +324,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setLoading(true)
       const provider = new GoogleAuthProvider()
+      // Set explicit Client ID as requested
+      provider.setCustomParameters({
+        client_id: '990425156188-vdnetqach0522rc814ngkefuq8j9v2j7.apps.googleusercontent.com'
+      })
       await signInWithRedirect(auth, provider)
       return { error: null }
     } catch (err: unknown) {
@@ -275,6 +343,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const provider = new OAuthProvider('apple.com')
       provider.addScope('email')
       provider.addScope('name')
+      // Ensure locale is set if needed, but callback URL is backend config
       await signInWithRedirect(auth, provider)
       return { error: null }
     } catch (err: unknown) {
@@ -316,7 +385,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false)
         return {
           error: null,
-          redirectTo: userProfile.role === 'admin' ? '/admin' : '/dashboard'
+          redirectTo: userProfile.role === 'admin' ? '/admin' : '/'
         }
       }
 

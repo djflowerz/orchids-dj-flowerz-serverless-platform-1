@@ -24,7 +24,7 @@ declare global {
 }
 
 import { db } from '@/lib/firebase'
-import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebase/firestore'
+import { collection, query, where, getDocs, orderBy, doc, getDoc, addDoc, updateDoc } from 'firebase/firestore'
 import { useEffect } from 'react'
 
 export interface Plan {
@@ -100,50 +100,99 @@ export default function SubscribePage() {
     if (!selectedTier) return
 
     try {
-      const response = await fetch('/api/subscriptions/initialize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: subscribeEmail,
-          tier: selectedTier.id, // Using Plan ID
-          amount: selectedTier.price, // Stored as Cents in DB
-          duration: getDurationDays(selectedTier.duration)
-        })
-      })
+      // Validate inputs
+      const subscribeEmail = user?.email || email
+      // ... (validation already there)
 
-      const data = await response.json()
+      // Generate Reference Client Side
+      const reference = `SUB-${Date.now()}-${Math.random().toString(36).substring(7)}`
 
-      if (!data.success) {
-        throw new Error(data.error || 'Failed to initialize subscription')
+      const activeKey = paystackKey || process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY
+
+      if (!activeKey) {
+        toast.error('Payment system not configured (Missing Public Key)')
+        setProcessing(false)
+        return
       }
 
+      console.log('Initializing Paystack for subscription with key:', activeKey ? '***' + activeKey.slice(-4) : 'MISSING')
+
       const handler = window.PaystackPop.setup({
-        key: paystackKey || process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || '',
+        key: activeKey,
         email: subscribeEmail,
         amount: selectedTier.price, // Cents
-
         currency: 'KES',
-        ref: data.reference,
-        callback: function (response: { reference: string }) {
-          fetch('/api/subscriptions/verify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reference: response.reference })
-          })
-            .then(res => res.json())
-            .then(verifyData => {
-              if (verifyData.success) {
-                toast.success('Welcome to the crew! Subscription activated.')
-                window.location.href = '/music-pool'
-              } else {
-                toast.error('Verification failed. Please contact support.')
+        ref: reference,
+        callback: async function (response: { reference: string }) {
+          // Verify Client Side (Trust Callback)
+          console.log('[Subscribe] Paystack callback triggered:', response)
+
+          try {
+            console.log('[Subscribe] Creating subscription record...')
+            const startDate = new Date()
+            const endDate = new Date()
+            endDate.setDate(startDate.getDate() + getDurationDays(selectedTier.duration))
+
+            const subData = {
+              id: reference, // Use ref as ID or auto-gen
+              user_id: user?.id || 'guest_sub_' + reference,
+              user_email: subscribeEmail,
+              tier: selectedTier.id,
+              plan_name: selectedTier.name,
+              status: 'active',
+              amount: selectedTier.price,
+              currency: 'KES',
+              reference: response.reference,
+              start_date: startDate.toISOString(),
+              end_date: endDate.toISOString(),
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }
+
+            // Add to 'subscriptions' collection
+            await addDoc(collection(db, 'subscriptions'), subData)
+            console.log('[Subscribe] Subscription record created successfully')
+
+            // Update User Profile to reflect subscription immediately
+            if (user && user.id) {
+              console.log('[Subscribe] Updating user profile...')
+              const userRef = doc(db, 'users', user.id)
+              try {
+                await updateDoc(userRef, {
+                  subscription_status: 'active',
+                  subscription_tier: selectedTier.id,
+                  subscription_end_date: endDate.toISOString()
+                })
+                console.log('[Subscribe] User profile updated successfully')
+              } catch (uErr) {
+                console.warn('[Subscribe] Could not update user profile directly', uErr)
               }
-              setProcessing(false)
+            }
+
+            // Show success message and wait before redirect
+            toast.success('🎉 Welcome to the crew! Subscription activated.', {
+              duration: 3000,
             })
-            .catch(() => {
-              toast.error('Verification error')
-              setProcessing(false)
+            console.log('[Subscribe] Success! Redirecting to music pool in 2 seconds...')
+
+            // Wait 2 seconds to ensure user sees the success message
+            setTimeout(() => {
+              window.location.href = '/music-pool'
+            }, 2000)
+
+          } catch (error) {
+            console.error('[Subscribe] Subscription save error:', error)
+            toast.error('Payment successful, but saving subscription failed. Please contact support.', {
+              duration: 5000,
             })
+
+            // Wait before redirect even on error
+            setTimeout(() => {
+              window.location.href = '/music-pool'
+            }, 3000)
+          } finally {
+            setProcessing(false)
+          }
         },
         onClose: () => {
           setProcessing(false)

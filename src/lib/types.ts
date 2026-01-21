@@ -32,6 +32,7 @@ export interface Mixtape {
   uploaded_by: string | null
   is_featured: boolean
   download_count: number
+  status: 'active' | 'inactive'
   created_at: string
   audio_download_url?: string | null
   video_download_url?: string | null

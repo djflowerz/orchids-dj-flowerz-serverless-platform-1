@@ -10,7 +10,7 @@ import { useRouter } from 'next/navigation'
 import { Trash2, Plus, Minus, ArrowLeft, CreditCard, ShoppingBag, Loader2, Truck, CheckCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { db } from '@/lib/firebase'
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore'
+import { collection, query, where, getDocs, doc, getDoc, addDoc } from 'firebase/firestore'
 
 declare global {
     interface Window {
@@ -75,8 +75,11 @@ export default function CheckoutPage() {
     )
 
     const handlePayment = async () => {
-        if (!paystackKey) {
-            toast.error('Payment configuration missing')
+        const activeKey = paystackKey || process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY
+
+        if (!activeKey) {
+            toast.error('Payment configuration missing (No Public Key found)')
+            console.error('Paystack key is missing. Check Firestore settings/site or NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY')
             return
         }
 
@@ -119,12 +122,15 @@ export default function CheckoutPage() {
         const amountToCharge = total
 
         try {
+            // Generate reference client-side
+            const reference = `ORD-${Date.now()}-${Math.random().toString(36).substring(7)}`
+
             const handler = window.PaystackPop.setup({
-                key: paystackKey,
+                key: activeKey,
                 email: shippingDetails.email,
                 amount: amountToCharge, // In kobo/cents
                 currency: 'KES',
-                ref: `ORD-${Date.now()}`,
+                ref: reference,
                 metadata: {
                     cart_items: items.map(i => ({
                         id: i.item.id,
@@ -133,39 +139,76 @@ export default function CheckoutPage() {
                     })),
                     shipping_details: hasPhysicalItems ? shippingDetails : undefined
                 },
-                callback: async (response) => {
-                    // Verify and Create Order
-                    try {
-                        const res = await fetch('/api/orders/create', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                user_id: user?.id,
-                                items: items.map(i => ({
-                                    product_id: i.type === 'product' ? i.item.id : undefined,
-                                    mixtape_id: i.type === 'mixtape' ? i.item.id : undefined,
-                                    amount: ('price' in i.item ? i.item.price : 0) * i.quantity,
-                                    quantity: i.quantity
-                                })), // Adapting to the strange "Single Item Loop" logic in API or just sending items for backend to parse?
-                                // The API in Step 1258 expects "items" array and loops to create orders.
-                                // It expects "item.mixtape_id", "item.product_id", "item.amount".
-                                reference: response.reference,
-                                currency: 'KES',
-                                email: shippingDetails.email
-                            })
-                        })
+                callback: (response) => {
+                    console.log('[Checkout] Paystack callback triggered:', response)
 
-                        if (res.ok) {
-                            setSuccess(true)
-                            clearCart()
-                            toast.success('Order placed successfully!')
-                        } else {
-                            toast.error('Payment successful but order creation failed. Contact support.')
-                        }
-                    } catch (e) {
-                        console.error(e)
-                        toast.error('Error creating order')
-                    }
+                        // Wrap async logic in an IIFE since Paystack doesn't accept async callbacks
+                        (async () => {
+                            const verifyToast = toast.loading('Verifying payment details...')
+
+                            try {
+                                // 1. Server-side Verification
+                                const verifyRes = await fetch('/api/verify-payment', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        reference: response.reference,
+                                        expectedAmount: amountToCharge
+                                    })
+                                })
+
+                                const verifyData = await verifyRes.json()
+
+                                if (!verifyRes.ok || !verifyData.verified) {
+                                    console.error('Payment Verification Failed:', verifyData)
+                                    toast.dismiss(verifyToast)
+                                    toast.error(`Payment Verification Failed: Amount mismatch. Paid: ${formatCurrency(verifyData.paid)}, Expected: ${formatCurrency(amountToCharge)}`)
+                                    return
+                                }
+
+                                toast.dismiss(verifyToast)
+                                toast.success('Payment verified! finalizing order...')
+
+                                // 2. Create Order Record
+                                console.log('[Checkout] Creating order record...')
+                                const orderData = {
+                                    user_id: user?.id || 'guest',
+                                    email: shippingDetails.email,
+                                    items: items.map(i => ({
+                                        product_id: i.type === 'product' ? i.item.id : null,
+                                        mixtape_id: i.type === 'mixtape' ? i.item.id : null,
+                                        amount: ('price' in i.item ? i.item.price : 0) * i.quantity,
+                                        quantity: i.quantity,
+                                        title: i.item.title,
+                                        type: i.type
+                                    })),
+                                    total_amount: amountToCharge,
+                                    currency: 'KES',
+                                    reference: response.reference,
+                                    status: 'paid',
+                                    payment_status: 'success',
+                                    shipping_details: hasPhysicalItems ? shippingDetails : null,
+                                    created_at: new Date().toISOString(),
+                                    updated_at: new Date().toISOString()
+                                }
+
+                                await addDoc(collection(db, 'orders'), orderData)
+                                console.log('[Checkout] Order created successfully!')
+
+                                setSuccess(true)
+                                clearCart()
+                                toast.success('🎉 Order placed successfully! Check your email for confirmation.', {
+                                    duration: 4000,
+                                })
+
+                            } catch (e) {
+                                console.error('[Checkout] Processing error:', e)
+                                toast.dismiss(verifyToast)
+                                toast.error('Payment succeeded but order creation failed. Please contact support with reference: ' + response.reference)
+                                // Verify passed, but DB failed. We still show success as they paid.
+                                setSuccess(true)
+                            }
+                        })()
                 },
                 onClose: () => {
                     setLoading(false)

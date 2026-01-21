@@ -10,6 +10,11 @@
 !.yarn/releases
 !.yarn/versions
 
+# firebase functions
+/functions/node_modules
+/functions/firebase-debug.log
+firebase-debug.log
+
 # testing
 /coverage
 

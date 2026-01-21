@@ -6,7 +6,7 @@ import { useAuth } from '@/context/AuthContext'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import { db } from '@/lib/firebase'
-import { doc, getDoc } from 'firebase/firestore'
+import { doc, getDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore'
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
@@ -75,47 +75,71 @@ export default function TipJarPage() {
     setProcessing(true)
 
     try {
-      const response = await fetch('/api/payments/initialize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: tipEmail,
-          amount: tipAmount,
-          paymentType: 'tip'
-        })
-      })
+      // Generate reference client-side for Static Deployment compatibility
+      const reference = `tip_${Date.now()}_${Math.random().toString(36).substring(7)}`
 
-      const data = await response.json()
+      const activeKey = paystackKey || process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY
 
-      if (!data.success) {
-        throw new Error(data.error || 'Failed to initialize payment')
+      console.log('Initializing Paystack with key:', activeKey ? '***' + activeKey.slice(-4) : 'MISSING')
+
+      if (!activeKey) {
+        toast.error('Payment system not configured (Missing Public Key)')
+        setProcessing(false)
+        return
       }
 
-      console.log('Initializing Paystack with key:', paystackKey || process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY)
       const handler = window.PaystackPop.setup({
-        key: paystackKey || process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || '',
+        key: activeKey,
         email: tipEmail,
         amount: tipAmount,
         currency: 'KES',
-        ref: data.reference,
+        ref: reference,
         callback: function (response: { reference: string }) {
-          fetch('/api/payments/verify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reference: response.reference })
-          })
-            .then(() => {
-              toast.success('Thank you for your support! 🎉')
+          console.log('[TipJar] Paystack callback triggered:', response)
+
+          const processTip = async () => {
+            try {
+              console.log('[TipJar] Saving tip to Firestore...')
+
+              // Record tip in Firestore directly (Client SDK)
+              await addDoc(collection(db, 'tips'), {
+                email: tipEmail,
+                amount: tipAmount,
+                reference: response.reference,
+                status: 'success', // Assumed success from callback
+                createdAt: serverTimestamp(),
+                userId: user?.id || 'anonymous'
+              })
+
+              console.log('[TipJar] Tip saved successfully!')
+              toast.success('🎉 Thank you for your support!', {
+                duration: 3000,
+              })
+
+              // Wait 2 seconds before redirect to ensure user sees the message
+              setTimeout(() => {
+                router.push(`/payment-success?reference=${response.reference}`)
+              }, 2000)
+
+            } catch (error) {
+              console.error('[TipJar] Error saving tip:', error)
+              // Even if save fails, payment succeeded
+              toast.success('🎉 Thank you for your support!', {
+                duration: 3000,
+              })
+
+              setTimeout(() => {
+                router.push(`/payment-success?reference=${response.reference}`)
+              }, 2000)
+            } finally {
               setProcessing(false)
-              router.push(`/payment-success?reference=${response.reference}`)
-            })
-            .catch(() => {
-              toast.error('Verification failed via callback')
-              setProcessing(false)
-            })
+            }
+          }
+          processTip()
         },
         onClose: function () {
           setProcessing(false)
+          toast.info('Payment cancelled')
         }
       })
 

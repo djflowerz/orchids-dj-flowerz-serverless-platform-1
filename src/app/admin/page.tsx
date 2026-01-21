@@ -230,9 +230,16 @@ function AdminContent() {
   useEffect(() => {
     if (!isAdmin) return
 
-    const unsubUsers = onSnapshot(query(collection(db, 'users'), orderBy('created_at', 'desc')), (snap) => {
-      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as UserData)))
-    })
+    const unsubUsers = onSnapshot(
+      query(collection(db, 'users'), orderBy('created_at', 'desc')),
+      (snap) => {
+        setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as UserData)))
+      },
+      (error) => {
+        console.error("Users snapshot error:", error)
+        toast.error('Failed to load users data. Check Firestore permissions.')
+      }
+    )
 
     const unsubProducts = onSnapshot(query(collection(db, 'products'), orderBy('created_at', 'desc')), (snap) => {
       setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Product)))
@@ -336,7 +343,7 @@ function AdminContent() {
     { id: 'shipping' as TabType, label: 'Shipping', icon: Truck },
   ]
 
-  const formatCurrency = (amount: number) => new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(amount)
+  const formatCurrency = (amount: number) => new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(amount / 100)
   const formatDate = (dateString: string) => {
     if (!dateString) return 'N/A'
     return new Date(dateString).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
@@ -2302,7 +2309,7 @@ function ProductModal({ product, onClose, onSave }: { product: Product | null; o
     description: product?.description || '',
     price: product?.price ? product.price / 100 : 0,
     product_type: product?.product_type || (product as any)?.type || 'digital',
-    status: product?.status || 'draft',
+    status: product?.status || 'published',
     category: product?.category || '',
     cover_images: product?.cover_images || [],
 

@@ -9,14 +9,16 @@ async function getProducts(): Promise<Product[]> {
       .orderBy('created_at', 'desc')
       .get()
 
-    return snapshot.docs.map(doc => {
-      const data = doc.data()
-      return {
-        id: doc.id,
-        ...data,
-        created_at: data.created_at?.toDate?.().toISOString() || new Date().toISOString()
-      } as Product
-    })
+    return snapshot.docs
+      .filter(doc => doc.data().status === 'published' || !doc.data().status) // Allow if status missing (legacy) or published
+      .map(doc => {
+        const data = doc.data()
+        return {
+          id: doc.id,
+          ...data,
+          created_at: data.created_at?.toDate?.().toISOString() || new Date().toISOString()
+        } as Product
+      })
   } catch (error) {
     console.error('Error fetching products:', error)
     return []

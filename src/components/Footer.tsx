@@ -17,16 +17,16 @@ export function Footer() {
               Premium mixtapes, exclusive music, and official merchandise. Join the movement and elevate your sound.
             </p>
             <div className="flex items-center gap-3">
-              <a href="#" className="p-2 rounded-full bg-white/5 text-white/50 hover:text-white hover:bg-white/10 transition-all">
+              <a href="https://instagram.com" target="_blank" rel="noopener noreferrer" aria-label="Instagram" className="p-2 rounded-full bg-white/5 text-white/50 hover:text-white hover:bg-white/10 transition-all">
                 <Instagram size={18} />
               </a>
-              <a href="#" className="p-2 rounded-full bg-white/5 text-white/50 hover:text-white hover:bg-white/10 transition-all">
+              <a href="https://twitter.com" target="_blank" rel="noopener noreferrer" aria-label="Twitter" className="p-2 rounded-full bg-white/5 text-white/50 hover:text-white hover:bg-white/10 transition-all">
                 <Twitter size={18} />
               </a>
-              <a href="#" className="p-2 rounded-full bg-white/5 text-white/50 hover:text-white hover:bg-white/10 transition-all">
+              <a href="https://youtube.com" target="_blank" rel="noopener noreferrer" aria-label="YouTube" className="p-2 rounded-full bg-white/5 text-white/50 hover:text-white hover:bg-white/10 transition-all">
                 <Youtube size={18} />
               </a>
-              <a href="#" className="p-2 rounded-full bg-white/5 text-white/50 hover:text-white hover:bg-white/10 transition-all">
+              <a href="mailto:support@djflowerz.com" aria-label="Contact Support" className="p-2 rounded-full bg-white/5 text-white/50 hover:text-white hover:bg-white/10 transition-all">
                 <Send size={18} />
               </a>
             </div>

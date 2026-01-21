@@ -46,7 +46,7 @@ export default async function BlogPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {posts.map((post) => (
-              <Link key={post.id} href={`/blog/${post.slug}`} className="group">
+              <Link key={post.id} href={`/blog/post?slug=${post.slug}`} className="group">
                 <div className="relative aspect-[16/10] rounded-3xl overflow-hidden mb-6 border border-white/10">
                   <Image
                     src={post.image_url || 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800'}

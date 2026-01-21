@@ -70,7 +70,7 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
       </head>
       <body className="antialiased">
-        <Script src="https://js.paystack.co/v1/inline.js" strategy="lazyOnload" />
+        <Script src="https://js.paystack.co/v1/inline.js" strategy="afterInteractive" />
         <Script
           id="sw-register"
           strategy="afterInteractive"

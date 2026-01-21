@@ -52,13 +52,12 @@ export function Navbar() {
               <Link
                 key={link.href}
                 href={link.href}
-                className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
-                  link.isButton
-                    ? 'bg-gradient-to-r from-pink-500 to-red-500 text-white hover:opacity-90 ml-2 shadow-lg shadow-pink-500/20'
-                    : isActive(link.href)
-                      ? 'bg-white text-black'
-                      : 'text-white/70 hover:text-white hover:bg-white/10'
-                }`}
+                className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${link.isButton
+                  ? 'bg-gradient-to-r from-pink-500 to-red-500 text-white hover:opacity-90 ml-2 shadow-lg shadow-pink-500/20'
+                  : isActive(link.href)
+                    ? 'bg-white text-black'
+                    : 'text-white/70 hover:text-white hover:bg-white/10'
+                  }`}
               >
                 <span className="flex items-center gap-2">
                   {link.isButton && <Heart size={14} className="fill-white" />}
@@ -91,7 +90,7 @@ export function Navbar() {
             </Link>
 
             {user ? (
-              <div className="flex items-center gap-2">
+              <div className="hidden md:flex items-center gap-2">
                 <Link
                   href="/dashboard?tab=notifications"
                   className="p-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-all"
@@ -117,7 +116,7 @@ export function Navbar() {
                 </Link>
                 <button
                   onClick={signOut}
-                  className="hidden sm:block px-4 py-2 rounded-full text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 transition-all"
+                  className="px-4 py-2 rounded-full text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 transition-all"
                 >
                   Sign Out
                 </button>
@@ -149,26 +148,53 @@ export function Navbar() {
                 key={link.href}
                 href={link.href}
                 onClick={() => setMobileOpen(false)}
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
-                  isActive(link.href)
-                    ? 'bg-white text-black'
-                    : 'text-white/70 hover:text-white hover:bg-white/10'
-                }`}
+                className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${isActive(link.href)
+                  ? 'bg-white text-black'
+                  : 'text-white/70 hover:text-white hover:bg-white/10'
+                  }`}
               >
                 <link.icon size={18} />
                 {link.label}
               </Link>
             ))}
             {user && (
-              <button
-                onClick={() => {
-                  signOut()
-                  setMobileOpen(false)
-                }}
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 transition-all"
-              >
-                Sign Out
-              </button>
+              <>
+                <Link
+                  href="/dashboard"
+                  onClick={() => setMobileOpen(false)}
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 transition-all"
+                >
+                  <User size={18} />
+                  My Dashboard
+                </Link>
+                <Link
+                  href="/dashboard?tab=notifications"
+                  onClick={() => setMobileOpen(false)}
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 transition-all"
+                >
+                  <Bell size={18} />
+                  Notifications
+                </Link>
+                {isAdmin && (
+                  <Link
+                    href="/admin"
+                    onClick={() => setMobileOpen(false)}
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 transition-all"
+                  >
+                    <LayoutDashboard size={18} />
+                    Admin Panel
+                  </Link>
+                )}
+                <button
+                  onClick={() => {
+                    signOut()
+                    setMobileOpen(false)
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 transition-all"
+                >
+                  Sign Out
+                </button>
+              </>
             )}
           </div>
         </div>

@@ -1,12 +1,14 @@
 "use client"
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { motion } from 'framer-motion'
 import { Search, Play, Lock, Download } from 'lucide-react'
 import { Mixtape } from '@/lib/types'
 import { formatCurrency } from '@/lib/utils'
+import { db } from '@/lib/firebase'
+import { collection, query, orderBy, onSnapshot, where } from 'firebase/firestore'
 
 const genres = ['All', 'Afrobeats', 'Hip-Hop', 'EDM', 'Amapiano', 'House', 'R&B']
 
@@ -15,6 +17,33 @@ export function MixtapesList({ initialMixtapes }: { initialMixtapes: Mixtape[] }
   const [search, setSearch] = useState('')
   const [genre, setGenre] = useState('All')
   const [filter, setFilter] = useState<'all' | 'free' | 'paid'>('all')
+
+  // Real-time listener for mixtapes
+  useEffect(() => {
+    const q = query(
+      collection(db, 'mixtapes'),
+      where('status', '==', 'active'),
+      orderBy('created_at', 'desc')
+    )
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const mixtapesData = snapshot.docs.map(doc => {
+        const data = doc.data()
+        return {
+          id: doc.id,
+          ...data,
+          created_at: data.created_at?.toDate?.().toISOString() || new Date().toISOString()
+        } as Mixtape
+      })
+      setMixtapes(mixtapesData)
+    }, (error) => {
+      console.error('Error fetching mixtapes:', error)
+      // Fall back to initial mixtapes on error
+      setMixtapes(initialMixtapes)
+    })
+
+    return () => unsubscribe()
+  }, [initialMixtapes])
 
   const filteredMixtapes = mixtapes.filter(m => {
     const matchesSearch = m.title.toLowerCase().includes(search.toLowerCase()) ||
@@ -43,11 +72,10 @@ export function MixtapesList({ initialMixtapes }: { initialMixtapes: Mixtape[] }
           <button
             key={g}
             onClick={() => setGenre(g)}
-            className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
-              genre === g
-                ? 'bg-white text-black'
-                : 'bg-white/5 text-white/70 hover:bg-white/10'
-            }`}
+            className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${genre === g
+              ? 'bg-white text-black'
+              : 'bg-white/5 text-white/70 hover:bg-white/10'
+              }`}
           >
             {g}
           </button>
@@ -67,7 +95,7 @@ export function MixtapesList({ initialMixtapes }: { initialMixtapes: Mixtape[] }
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.05 }}
             >
-              <Link href={`/mixtapes/${mixtape.id}`} className="group block">
+              <Link href={`/mixtapes/view?id=${mixtape.id}`} className="group block">
                 <div className="relative aspect-square rounded-2xl overflow-hidden mb-4">
                   <Image
                     src={mixtape.cover_image || 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=500'}
@@ -76,7 +104,7 @@ export function MixtapesList({ initialMixtapes }: { initialMixtapes: Mixtape[] }
                     className="object-cover group-hover:scale-110 transition-transform duration-500"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                  
+
                   <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                     <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
                       <Play size={28} className="text-white ml-1" />

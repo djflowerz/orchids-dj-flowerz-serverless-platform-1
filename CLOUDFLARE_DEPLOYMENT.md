@@ -1,0 +1,117 @@
+# Cloudflare Pages Deployment Guide
+
+## ✅ What's Already Done
+
+1. ✅ Code pushed to GitHub: `djflowerz/orchids-dj-flowerz-serverless-platform-1`
+2. ✅ Cloudflare adapter installed: `@cloudflare/next-on-pages`
+3. ✅ Build script configured: `npm run pages:build`
+4. ✅ Dependencies fixed for compatibility
+5. ✅ All features implemented and tested locally
+
+## 🚀 Deploy to Cloudflare Pages (5 minutes)
+
+### Step 1: Connect GitHub to Cloudflare
+
+1. Go to: **https://dash.cloudflare.com/**
+2. Click: **Workers & Pages** (left sidebar)
+3. Click: **Create application** → **Pages** → **Connect to Git**
+4. Authorize GitHub and select: `djflowerz/orchids-dj-flowerz-serverless-platform-1`
+
+### Step 2: Configure Build Settings
+
+```
+Project name: djflowerz-site
+Production branch: main
+Build command: npm run pages:build
+Build output directory: .vercel/output/static
+Root directory: / (leave default)
+```
+
+### Step 3: Add Environment Variables
+
+Click **"Add variable"** for each:
+
+```bash
+# Firebase Configuration
+NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyCJ-yumwuCfGwxgjRhyCUIIc50_tcmEwb4
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=flowpay-401a4.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=flowpay-401a4
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=flowpay-401a4.firebasestorage.app
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=990425156188
+NEXT_PUBLIC_FIREBASE_APP_ID=1:990425156188:web:0b95648801bdd2a7d3f499
+
+# Firebase Admin (Server-side)
+FIREBASE_CLIENT_EMAIL=firebase-adminsdk-fbsvc@flowpay-401a4.iam.gserviceaccount.com
+FIREBASE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDMAfIlZrPraXd+\nLt3SX+9wIN0ob8GDHMIZEllXk1O5bXhRrhnnjgkSLEQK2zKARJyDJBfY6pmFAbOr\n/ZjSTIqsp7xSa/qRq7S7Yu+USDu/wb5wSN29cHaj5UiINLZwckbTMzemIYzmfF5Q\nJ9ZQ0XTeKhP5k7yNOjEAFGplB6ytfME7if4ipCND89z5BzAp1ZGK2RscoUC9LRZl\nO8GMp6gNuBAQotjZe6zwxvz2eGFodwOsvVyVBGLzAgL7+9DZkF6I2JLs+modf1k7\ncijemgbIR6zX884o0zWWp4N7RZcUJpnqcvPcIyT/JxKpg9x3PTQ8iWeyOQ0fOSQT\no7oPM/EHAgMBAAECggEAGeSNVU3pvBFQx0UvhkoC29pv93fnubpmsEPx7vmWAMzy\nHnvYcdlHMXVI1Y/oovsSWlq0ZCWygn0qzsOLJ/XrC+rmLhfiX6bJc5clDU71tmri\nvuGgszCY/khVomP+W9tFPf0cLQvJFF/ooIfN3cgX6zKwAldL8SjXm0j8EAKfWg1n\naZ3Vvq/EPrH9VjCEPdJD21WDADH//ETcRaa4sECNTRXt1wnmXwD1a4td6CZk30Fo\n6YvCcmj5t/YDktHYd2bL4oK9S3WKF7M0akt31l1jwdI/EzheAQAxW2DSby3kJj9l\npNCQsCOrshzxxTGAlm5yUNw5T7ioLldp+lL45XNmsQKBgQDw52YEy24e6oMAXpsA\nsdZyycteLfmrvXQQdkZQ2mBOC7S+XbOBPNjRlo8Uf9zTcWbyZynaLMI05fTaimBE\ncuM6wQ2yWYtPJ6qzJlXSfBtIfrSS8JCCupsxIEqVfmulpF9Wb/Djy8bd+NaP5Iz7\nilcqsOZkwZUETQUNiT4GOKwewKBgQDYyqdZKbz5gHVaqKVa6jlMQRqXo9YsGphx\n4dE8h+RTfo8T/ik4cCdeMvwYXdqdfL9tcvtZl5xZ+J+7Cbk9NIh52myFp9gRQh3k\nwlM9Jy55Xz3CwsflhI59HrSmF+y8zehCbPW8k3U2Km0yvvRcYq+7xMihntxOGySh\nBA9PB3tJ5QKBgDtuWtTD+x7VbAwjSsoZFXasIefSH84mpwOIqkA4H5oheS2doDM5\n96N9KT89bBUd3O/gU4rnj+HM+WMQ0D8SuMw95EsjnCKi/pHD21haFcEEwTee8YfO\n0YqFFOFcluH+cya35w3Lr/wC76wADmfsufeKiUbR5rXGqLpzwRsTyJkRAoGAYt+6\nh33zxE+ENn7oO5jL3S1sNXDxw1e142q8hUDtL+9uzg2DO0xbiCj0tSBJDr7Qh9iD\nLo9pLdeo8iMzKukEvZ6TFDpC30wqWiUO1btDBPQdNPClPtbALeyNM5uBy3KV1YXg\nZctTEAs1lolk5aXUxGyxnJTZoX3brNwvJzogTskCgYEA5aMJB8STNstsw45FVXP6\nCCOoD0D5uLK0de9GN397EoFlJ0bDLuH4GQ8F6oSeJeiDZDPrXUYHyLg2kCHcJixj\nPuW0ohHhiGVGuedmnGYkzoa2t92c4HiuHfa0t0kHCNrQkOPK4L6wPYQQ62I0eAB5\nxi76SvyRldERUnTWQPxPN3M=\n-----END PRIVATE KEY-----\n
+
+# OR use Base64 encoded (recommended)
+FIREBASE_SERVICE_ACCOUNT_B64=eyJ0eXBlIjoic2VydmljZV9hY2NvdW50IiwicHJvamVjdF9pZCI6ImZsb3dwYXktNDAxYTQiLCJwcml2YXRlX2tleV9pZCI6Ijc5NDQ2MzEyYzEzM2RkZjZiNjA0Mjk2YTVmZjg1MDEwNDk1MTIwMjEiLCJwcml2YXRlX2tleSI6Ii0tLS0tQkVHSU4gUFJJVkFURSBLRVktLS0tLVxuTUlJRXZRSUJBREFOQmdrcWhraUc5dzBCQVFFRkFBU0NCS2N3Z2dTakFnRUFBb0lCQVFETUFmSWxaclByYVhkK1xuTHQzU1grOXdJTjBvYjhHREhNSVpFbGxYazFPNWJYaFJyaG5uamdrU0xFUUsyektBUkp5REpCZlk2cG1GQWJPclxuL1pqU1RJcXNwN3hTYS9xUnE3UzdZdStVU0R1L3diNXdTTjI5Y0hhajVVaUlOTFp3Y2tiVE16ZW1JWXptZkY1UVxuSjlaUTBYVGVLaFA1azd5Tk9qRUFGR3BsQjZ5dGZNRTdpZjRpcENORDg5ejVCekFwMVpHSzJSc2NvVUM5TFJabFxuTzhHTXA2Z051QkFRb3RqWmU2end4dnoyZUdGb2R3T3N2VnlWQkdMekFnTDcrOURaa0Y2STJKTHMrbW9kZjFrN1xuY2lqZW1nYklSNnpYODg0bzB6V1dwNE43UlpjVUpwbnFjdlBjSXlUL0p4S3BnOXgzUFRROGlXZXlPUTBmT1NRVFxubzdvUE0vRUhBZ01CQUFFQ2dnRUFHZVNOVlUzcHZCRlF4MFV2aGtvQzI5cHY5M2ZudWJwbXNFUHg3dm1XQU16eVxuSG52WWNkbEhNWFZJMVkvb292c1NXbHEwWkNXeWduMHF6c09MSi9YckMrcm1MaGZpWDZiSmM1Y2xEVTcxdG1yaVxudnVHZ3N6Q1kva2hWb21QK1c5dEZQZjBjTFF2SkZGL29vSWZOM2NnWDZ6S3dBbGRMOFNqWG0wajhFQUtmV2cxblxuYVozVnZxL0VQckg5VmpDRVBkSkQyMVdEQURILy9FVGNSYWE0c0VDTlRSWHQxd25tWHdEMWE0dGQ2Q1prMzBGb1xuNll2Q2NtajV0L1lEa3RIWWQyYkw0b0s5UzNXS0Y3TTBha3QzMWwxandkSS9FemhlQVFBeFcyRFNieTNrSmo5bFxucE5DUXNDT3JzaHp4eFRHQWxtNXlVTnc1VDdpb0xsZHArbEw0NVhObXNRS0JnUUR3NTJZRXkyNGU2b01BWHBzQVxuc2RaeXljdGVMZm1ydlhRUWRrWlEybUJPQzdTK1hiT0JQTmpSbG84VWY5elRjV2J5WnluYUxNSTA1ZlRhaW1CRVxuY3VNNndRMnlXWXRQSjZxekpsWFNmQnRJZnJTUzhKQ0N1cHN4SUVxVmZtdWxwRjlXYi9Eank4YmQrTmFQNUl6N1xudmlsY3FzT1prd1pVRVRRVU5pVDRHT0t3ZXdLQmdRRFl5cWRaS2J6NWdIVmFxS1ZhNmpsTVFScVhvOVlzR3BoeFxuNGRFOGgrUlRmbzhUL2lrNGNDZGVNdndZWGRxZGZMOXRjdnRabDV4WitKKzdDYms5TkloNTJteUZwOWdSUWgza1xud2xNOUp5NTVYejNDd3NmbGhJNTlIclNtRit5OHplaENiUFc4azNVMkttMHl2dlJjWXErN3hNaWhudHhPR3lTaFxuQkE5UEIzdEo1UUtCZ0R0dVd0VEQreDdWYkF3alNzb1pGWGFzSWVmU0g4NG1wd09JcWtBNEg1b2hlUzJkb0RNNVxuOTZOOUtUODliQlVkM08vZ1U0cm5qK0hNK1dNUTBEOFN1TXc5NUVzam5DS2kvcEhEMjFoYUZjRUV3VGVlOFlmT1xuMFlxRkZPRmNsdUgrY3lhMzV3M0xyL3dDNzZ3QURtZnN1ZmVLaVViUjVyWEdxTHB6d1JzVHlKa1JBb0dBWXQrNlxuaDMzenhFK0VObjdvTzVqTDNTMXNOWER4dzFlMTQycThoVUR0TCs5dXpnMkRPMHhiaUNqMHRTQkpEcjdRaDlpRFxuTG85cExkZW84aU16S3VrRXZaNlRGRHBDMzB3cVdpVU8xYnREQlBRZE5QQ2xQdGJBTGV5Tk01dUJ5M0tWMVlYZ1xuWmN0VEVBczFsb2xrNWFYVXhHeXhuSlRab1gzYnJOd3ZKem9nVHNrQ2dZRUE1YU1KQjhTVE5zdHN3NDVGVlhQNlxuQ0NPb0QwRDV1TEswZGU5R04zOTdFb0ZsSjBiREx1SDRHUThGNm9TZUplaURaRFByWFVZSHlMZzJrQ0hjSml4alxuUHVXMG9oSGhpR1ZHdWVkbW5HWWt6b2EydDkyYzRIaXVIZmEwdDBrSENOclFrT1BLNEw2d1BZUVE2MkkwZUFCNVxueGk3NlN2eVJsZEVSVW5UV1FQeFBOM009XG4tLS0tLUVORCBQUklWQVRFIEtFWS0tLS0tXG4iLCJjbGllbnRfZW1haWwiOiJmaXJlYmFzZS1hZG1pbnNkay1mYnN2Y0BmbG93cGF5LTQwMWE0LmlhbS5nc2VydmljZWFjY291bnQuY29tIiwiY2xpZW50X2lkIjoiMTE1Njc0MDU0ODE4NjI1OTI5NTMyIiwiYXV0aF91cmkiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20vby9vYXV0aDIvYXV0aCIsInRva2VuX3VyaSI6Imh0dHBzOi8vb2F1dGgyLmdvb2dsZWFwaXMuY29tL3Rva2VuIiwiYXV0aF9wcm92aWRlcl94NTA5X2NlcnRfdXJsIjoiaHR0cHM6Ly93d3cuZ29vZ2xlYXBpcy5jb20vb2F1dGgyL3YxL2NlcnRzIiwiY2xpZW50X3g1MDlfY2VydF91cmwiOiJodHRwczovL3d3dy5nb29nbGVhcGlzLmNvbS9yb2JvdC92MS9tZXRhZGF0YS94NTA5L2ZpcmViYXNlLWFkbWluc2RrLWZic3ZjJTQwZmxvd3BheS00MDFhNC5pYW0uZ3NlcnZpY2VhY2NvdW50LmNvbSIsInVuaXZlcnNlX2RvbWFpbiI6Imdvb2dsZWFwaXMuY29tIn0=
+
+# Paystack (Live Keys)
+NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY=pk_live_2ed6a5c46ebab203998efd1f5d9c22d2dcc05f71
+PAYSTACK_SECRET_KEY=sk_live_ec66162f517e07fb5e2322ec5e5281e2fe3ab74b
+
+# Telegram (Optional)
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_ADMIN_CHAT_ID=your_chat_id
+```
+
+### Step 4: Enable Node.js Compatibility
+
+1. After creating the project, go to: **Settings** → **Functions**
+2. Under **Compatibility flags**, add: `nodejs_compat`
+3. Click **Save**
+
+### Step 5: Deploy!
+
+Click **"Save and Deploy"**
+
+Your site will be live at: `https://djflowerz-site.pages.dev`
+
+## 🔄 Automatic Deployments
+
+Every time you push to GitHub `main` branch, Cloudflare will automatically:
+1. Pull the latest code
+2. Run `npm run pages:build`
+3. Deploy the new version
+
+## 🐛 Troubleshooting
+
+### Build Fails
+- Check build logs in Cloudflare dashboard
+- Verify all environment variables are set
+- Ensure `nodejs_compat` flag is enabled
+
+### API Routes Return 500
+- Check Functions logs in Cloudflare dashboard
+- Verify Firebase credentials are correct
+- Ensure `FIREBASE_SERVICE_ACCOUNT_B64` is set
+
+### Paystack Not Working
+- Verify Live Keys are set correctly
+- Check Paystack dashboard webhook settings
+- Webhook URL should be: `https://djflowerz-site.pages.dev/api/paystack/webhook`
+
+## 📊 Architecture
+
+```
+GitHub (Code) → Cloudflare Pages (Hosting) → Firebase (Backend/Auth/DB)
+                      ↓
+                Paystack (Payments)
+                      ↓
+                Telegram (Notifications)
+```
+
+## ✅ Post-Deployment Checklist
+
+- [ ] Site loads at `https://djflowerz-site.pages.dev`
+- [ ] Login/Signup works
+- [ ] Admin panel accessible
+- [ ] Store products display
+- [ ] Tip Jar payment works
+- [ ] Subscription payment works
+- [ ] Webhook receives Paystack events
+
+---
+
+**Need help?** Check Cloudflare Pages docs: https://developers.cloudflare.com/pages/

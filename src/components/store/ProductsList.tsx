@@ -10,7 +10,7 @@ import { useCart } from '@/context/CartContext'
 import { Product } from '@/lib/types'
 import { formatCurrency } from '@/lib/utils'
 import { db } from '@/lib/firebase'
-import { collection, query, where, getDocs } from 'firebase/firestore'
+import { collection, query, where, getDocs, onSnapshot, orderBy } from 'firebase/firestore'
 
 const categories = ['All', 'Apparel', 'Samples', 'Software', 'Accessories']
 const types = ['all', 'digital', 'physical']
@@ -63,23 +63,48 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
   }
 
   useEffect(() => {
-    async function fetchProductsWithRatings() {
+    // Real-time listener for Products
+    const q = query(
+      collection(db, 'products'),
+      where('status', '==', 'published')
+      // Note: orderBy('created_at', 'desc') might require composite index. 
+      // Client-side sort is already handling order, so we can skip it here for safety.
+    )
+
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      const liveProducts = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        // Ensure created_at is string if Timestamp
+        created_at: (doc.data().created_at?.toDate?.() || new Date(doc.data().created_at || Date.now())).toISOString()
+      } as Product))
+
+      if (liveProducts.length === 0) {
+        setProducts([])
+        return
+      }
+
+      // Fetch Ratings whenever products update
       try {
-        const productIds = initialProducts.map(p => p.id)
+        const productIds = liveProducts.map(p => p.id)
+        // Split IDs into chunks of 10 for 'in' query limit if needed, 
+        // but for now assuming < 30 products or handle gracefully.
+        // Actually, 'in' query limit is 10 (or 30). If lots of products, better to fetch ALL ratings?
+        // Or just fetch ratings for *displayed* products?
 
-        if (productIds.length === 0) {
-          setProducts([])
-          return
-        }
+        // Simplification: Fetch all reviews. (Or handle batching if really needed).
+        // Since we want real-time products, let's just fetch all reviews for now to be safe.
+        // OR better: Just map IDs.
 
-        const q = query(
-          collection(db, 'product_reviews'),
-          where('product_id', 'in', productIds)
-        )
-        const snapshot = await getDocs(q)
+        const reviewsQ = query(collection(db, 'product_reviews'), where('product_id', 'in', productIds.slice(0, 30)))
+        // Note: Firestore 'in' limit is 30. If > 30 products, this will fail/truncate.
+        // Fallback: Fetch ALL reviews if > 30 products? or just fetch reviews collection?
+        // Let's assume < 30 for now or fetch ALL reviews.
+        // Safest: Fetch ALL reviews to avoid limit.
+        const allReviewsSnapshot = await getDocs(collection(db, 'product_reviews'))
 
         const reviewsByProduct: Record<string, number[]> = {}
-        snapshot.docs.forEach(doc => {
+        allReviewsSnapshot.docs.forEach(doc => {
           const data = doc.data()
           if (!reviewsByProduct[data.product_id]) {
             reviewsByProduct[data.product_id] = []
@@ -87,7 +112,7 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
           reviewsByProduct[data.product_id].push(data.rating)
         })
 
-        const productsWithRatings = initialProducts.map(product => {
+        const productsWithRatings = liveProducts.map(product => {
           const ratings = reviewsByProduct[product.id] || []
           const average = ratings.length > 0
             ? ratings.reduce((sum, r) => sum + r, 0) / ratings.length
@@ -101,18 +126,15 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
         })
 
         setProducts(productsWithRatings)
-      } catch (error) {
-        console.error('Error fetching product ratings:', error)
-        setProducts(initialProducts.map(p => ({ ...p, average_rating: 0, review_count: 0 })))
-      }
-    }
 
-    if (initialProducts.length > 0) {
-      fetchProductsWithRatings()
-    } else {
-      setProducts([])
-    }
-  }, [initialProducts])
+      } catch (error) {
+        console.error('Error fetching ratings in realtime listener:', error)
+        setProducts(liveProducts.map(p => ({ ...p, average_rating: 0, review_count: 0 })))
+      }
+    })
+
+    return () => unsubscribe()
+  }, []) // Remove initialProducts dependency to avoid loop, we want just one listener.
 
   const filteredProducts = products.filter(p => {
     const matchesSearch = p.title.toLowerCase().includes(search.toLowerCase())
@@ -331,7 +353,7 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.05 }}
               >
-                <Link href={`/store/${product.id}`} className="group block">
+                <Link href={`/store/product?id=${product.id}`} className="group block">
                   <div className="relative aspect-square rounded-2xl overflow-hidden mb-4 bg-white/5">
                     <Image
                       src={image}

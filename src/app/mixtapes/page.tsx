@@ -9,7 +9,7 @@ async function getMixtapes(): Promise<Mixtape[]> {
       .orderBy('created_at', 'desc')
       .get()
 
-    return snapshot.docs.map(doc => {
+    const allMixtapes = snapshot.docs.map(doc => {
       const data = doc.data()
       return {
         id: doc.id,
@@ -17,6 +17,9 @@ async function getMixtapes(): Promise<Mixtape[]> {
         created_at: data.created_at?.toDate?.().toISOString() || new Date().toISOString()
       } as Mixtape
     })
+
+    // Filter by active status in memory to avoid index requirements
+    return allMixtapes.filter(m => m.status === 'active')
   } catch (error) {
     console.error('Error fetching mixtapes:', error)
     return []

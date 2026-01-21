@@ -1,39 +1,71 @@
-import { adminDb } from '@/lib/firebase-admin'
+"use client"
+
+import { useEffect, useState, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { collection, query, where, getDocs } from 'firebase/firestore'
+import { db } from '@/lib/firebase'
 import { BlogPost } from '@/lib/types'
 import Image from 'next/image'
 import Link from 'next/link'
-import { ArrowLeft, Calendar, User, Share2 } from 'lucide-react'
-import { notFound } from 'next/navigation'
+import { ArrowLeft, Calendar, Share2 } from 'lucide-react'
 
-async function getPost(slug: string): Promise<BlogPost | null> {
-  try {
-    const snapshot = await adminDb
-      .collection('blog_posts')
-      .where('slug', '==', slug)
-      .limit(1)
-      .get()
+function BlogPostContent() {
+  const searchParams = useSearchParams()
+  const slug = searchParams.get('slug')
 
-    if (snapshot.empty) return null
+  const [post, setPost] = useState<BlogPost | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
 
-    const doc = snapshot.docs[0]
-    const data = doc.data()
-    return {
-      id: doc.id,
-      ...data,
-      created_at: data.created_at?.toDate?.().toISOString() || new Date().toISOString(),
-      updated_at: data.updated_at?.toDate?.().toISOString() || new Date().toISOString()
-    } as BlogPost
-  } catch (error) {
-    console.error('Error fetching blog post:', error)
-    return null
+  useEffect(() => {
+    async function fetchPost() {
+      if (!slug) return
+
+      try {
+        const q = query(collection(db, 'blog_posts'), where('slug', '==', slug))
+        const snapshot = await getDocs(q)
+
+        if (!snapshot.empty) {
+          const doc = snapshot.docs[0]
+          const data = doc.data()
+          setPost({
+            id: doc.id,
+            ...data,
+            created_at: data.created_at?.toDate?.().toISOString() || new Date().toISOString(),
+            updated_at: data.updated_at?.toDate?.().toISOString() || new Date().toISOString()
+          } as BlogPost)
+        } else {
+          setError(true)
+        }
+      } catch (e) {
+        console.error('Error fetching blog post:', e)
+        setError(true)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchPost()
+  }, [slug])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-black">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+      </div>
+    )
   }
-}
 
-export default async function BlogPostPage({ params }: { params: { slug: string } }) {
-  const post = await getPost(params.slug)
-
-  if (!post) {
-    notFound()
+  if (error || !post) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-black text-white">
+        <h2 className="text-2xl font-bold mb-4">Post Not Found</h2>
+        <p className="text-white/60 mb-8">The blog post you are looking for does not exist.</p>
+        <Link href="/blog" className="px-6 py-2 bg-white/10 rounded-full hover:bg-white/20 transition-colors">
+          Back to Blog
+        </Link>
+      </div>
+    )
   }
 
   return (
@@ -101,5 +133,13 @@ export default async function BlogPostPage({ params }: { params: { slug: string 
         </div>
       </div>
     </div>
+  )
+}
+
+export default function BlogPostPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen bg-black"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div></div>}>
+      <BlogPostContent />
+    </Suspense>
   )
 }
