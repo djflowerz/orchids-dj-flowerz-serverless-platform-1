@@ -22,19 +22,24 @@ export function MixtapesList({ initialMixtapes }: { initialMixtapes: Mixtape[] }
   useEffect(() => {
     const q = query(
       collection(db, 'mixtapes'),
-      where('status', '==', 'active'),
       orderBy('created_at', 'desc')
     )
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const mixtapesData = snapshot.docs.map(doc => {
         const data = doc.data()
+        // Map legacy fields to new schema
         return {
           id: doc.id,
           ...data,
+          title: data.title || data.name || 'Untitled Mixtape',
+          cover_image: data.cover_image || data.image || '',
+          price: data.price || 0,
+          status: data.status || 'active', // Default to active if missing (legacy)
           created_at: data.created_at?.toDate?.().toISOString() || new Date().toISOString()
         } as Mixtape
-      })
+      }).filter(m => m.status === 'active') // Filter dynamically
+
       setMixtapes(mixtapesData)
     }, (error) => {
       console.error('Error fetching mixtapes:', error)

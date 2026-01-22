@@ -10,7 +10,7 @@ import { useRouter } from 'next/navigation'
 import { Trash2, Plus, Minus, ArrowLeft, CreditCard, ShoppingBag, Loader2, Truck, CheckCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { db } from '@/lib/firebase'
-import { collection, query, where, getDocs, doc, getDoc, addDoc } from 'firebase/firestore'
+import { collection, query, where, getDocs, doc, getDoc, addDoc, onSnapshot } from 'firebase/firestore'
 
 declare global {
     interface Window {
@@ -74,141 +74,111 @@ export default function CheckoutPage() {
         i.type === 'product' && (i.item as any).product_type === 'physical'
     )
 
+    const [pendingOrderId, setPendingOrderId] = useState<string | null>(null)
+
+    // Listen for order status changes
+    useEffect(() => {
+        if (!pendingOrderId) return
+
+        const unsubscribe = onSnapshot(doc(db, 'orders', pendingOrderId), (doc) => {
+            if (doc.exists()) {
+                const data = doc.data()
+                if (data.status === 'paid') {
+                    // Redirect to locked page immediately
+                    router.push(`/payment-success?orderId=${pendingOrderId}`)
+                }
+            }
+        })
+
+        return () => unsubscribe()
+    }, [pendingOrderId, router])
+
     const handlePayment = async () => {
         const activeKey = paystackKey || process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY
 
         if (!activeKey) {
-            toast.error('Payment configuration missing (No Public Key found)')
-            console.error('Paystack key is missing. Check Firestore settings/site or NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY')
+            toast.error('Payment configuration missing')
             return
         }
 
-        if (hasPhysicalItems) {
-            if (!shippingDetails.fullName || !shippingDetails.email || !shippingDetails.phone || !shippingDetails.address || !shippingDetails.city) {
-                toast.error('Please fill in all shipping details')
-                return
-            }
-        } else {
-            if (!shippingDetails.email) {
-                toast.error('Email is required')
-                return
-            }
+        if (hasPhysicalItems && (!shippingDetails.fullName || !shippingDetails.email || !shippingDetails.address)) {
+            toast.error('Please fill in shipping details')
+            return
+        }
+        if (!hasPhysicalItems && !shippingDetails.email) {
+            toast.error('Email is required')
+            return
         }
 
         setLoading(true)
 
-        // Calculate amount correctly (Paystack expects CENTS)
-        // Cart 'total' is in CENTS (sum of item.price * quantity).
-        // Because formatCurrency(total) divides by 100, we know total is Cents.
-        // So we assume TOTAL is CENTS.
-        // Wait, let's verify CartContext Total Calculation.
-        // CartContext: `price = 'price' in i.item ? i.item.price : 0`. `sum + price * quantity`.
-        // Product items now store CENTS (50000). Cart total is 50000.
-        // Paystack Amount should be CENTS. So passing `total` (50000) is correct.
-        // However, if user previously thought 'total' was Major units, and we pass 500 major = 50000 cents?
-        // User requested "Admin sets 500, User sees 5". (Divides by 100).
-        // If Admin sets 500 (Major), saves 50000 (Cents).
-        // Cart Total = 50000.
-        // formatCurrency(50000) -> 500 KES.
-        // Paystack Amount = 50000 (Cents) = 500 KES.
-        // Before my fix: Admin input 500. Saved 500. Total 500. formatCurrency(500) -> 5 KES. Paystack(500) -> 5 KES.
-
-        // So passing `total` is correct IF `total` is in CENTS.
-        // Since I updated Admin Save to store Cents, `total` will be Cents.
-
-        // BUT! Some items might be old (Major Units).
-        // I can't distinguish easily. Assuming new items.
-
-        const amountToCharge = total
-
         try {
-            // Generate reference client-side
-            const reference = `ORD-${Date.now()}-${Math.random().toString(36).substring(7)}`
+            // STEP 1: CREATE PENDING ORDER
+            const orderData = {
+                userId: user?.id || 'guest',
+                email: shippingDetails.email,
+                items: items.map(i => ({
+                    product_id: i.type === 'product' ? i.item.id : null,
+                    mixtape_id: i.type === 'mixtape' ? i.item.id : null,
+                    amount: ('price' in i.item ? i.item.price : 0) * i.quantity,
+                    quantity: i.quantity,
+                    title: i.item.title,
+                    type: i.type
+                })),
+                total_amount: total,
+                currency: 'KES',
+                status: 'pending', // 👈 PENDING initiates the flow
+                payment_status: 'pending',
+                shipping_details: hasPhysicalItems ? shippingDetails : null,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            }
 
+            const orderRef = await addDoc(collection(db, 'orders'), orderData)
+            const orderId = orderRef.id
+            setPendingOrderId(orderId)
+
+            // STEP 2: INITIALIZE PAYSTACK WITH ORDER ID
             const handler = window.PaystackPop.setup({
                 key: activeKey,
                 email: shippingDetails.email,
-                amount: amountToCharge, // In kobo/cents
+                amount: total,
                 currency: 'KES',
-                ref: reference,
+                ref: orderId, // 👈 REFERENCE IS ORDER ID
                 metadata: {
-                    cart_items: items.map(i => ({
-                        id: i.item.id,
-                        title: i.item.title,
-                        quantity: i.quantity
-                    })),
-                    shipping_details: hasPhysicalItems ? shippingDetails : undefined
+                    order_id: orderId,
+                    cart_items: items.map(i => i.item.title).join(', ')
                 },
-                callback: (response) => {
-                    console.log('[Checkout] Paystack callback triggered:', response)
+                callback: async (response) => {
+                    console.log('[Checkout] Paystack callback:', response)
+                    toast.loading('Verifying payment... Please wait.')
 
-                        // Wrap async logic in an IIFE since Paystack doesn't accept async callbacks
-                        (async () => {
-                            const verifyToast = toast.loading('Verifying payment details...')
+                    try {
+                        const verifyRes = await fetch('/api/verify-payment', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                reference: response.reference,
+                                orderId: orderId
+                            })
+                        })
 
-                            try {
-                                // 1. Server-side Verification
-                                const verifyRes = await fetch('/api/verify-payment', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                        reference: response.reference,
-                                        expectedAmount: amountToCharge
-                                    })
-                                })
+                        const verifyData = await verifyRes.json()
 
-                                const verifyData = await verifyRes.json()
-
-                                if (!verifyRes.ok || !verifyData.verified) {
-                                    console.error('Payment Verification Failed:', verifyData)
-                                    toast.dismiss(verifyToast)
-                                    toast.error(`Payment Verification Failed: Amount mismatch. Paid: ${formatCurrency(verifyData.paid)}, Expected: ${formatCurrency(amountToCharge)}`)
-                                    return
-                                }
-
-                                toast.dismiss(verifyToast)
-                                toast.success('Payment verified! finalizing order...')
-
-                                // 2. Create Order Record
-                                console.log('[Checkout] Creating order record...')
-                                const orderData = {
-                                    user_id: user?.id || 'guest',
-                                    email: shippingDetails.email,
-                                    items: items.map(i => ({
-                                        product_id: i.type === 'product' ? i.item.id : null,
-                                        mixtape_id: i.type === 'mixtape' ? i.item.id : null,
-                                        amount: ('price' in i.item ? i.item.price : 0) * i.quantity,
-                                        quantity: i.quantity,
-                                        title: i.item.title,
-                                        type: i.type
-                                    })),
-                                    total_amount: amountToCharge,
-                                    currency: 'KES',
-                                    reference: response.reference,
-                                    status: 'paid',
-                                    payment_status: 'success',
-                                    shipping_details: hasPhysicalItems ? shippingDetails : null,
-                                    created_at: new Date().toISOString(),
-                                    updated_at: new Date().toISOString()
-                                }
-
-                                await addDoc(collection(db, 'orders'), orderData)
-                                console.log('[Checkout] Order created successfully!')
-
-                                setSuccess(true)
-                                clearCart()
-                                toast.success('🎉 Order placed successfully! Check your email for confirmation.', {
-                                    duration: 4000,
-                                })
-
-                            } catch (e) {
-                                console.error('[Checkout] Processing error:', e)
-                                toast.dismiss(verifyToast)
-                                toast.error('Payment succeeded but order creation failed. Please contact support with reference: ' + response.reference)
-                                // Verify passed, but DB failed. We still show success as they paid.
-                                setSuccess(true)
-                            }
-                        })()
+                        if (verifyRes.ok && verifyData.verified) {
+                            setSuccess(true)
+                            clearCart()
+                            // Redirect to success page
+                            router.push(`/payment-success?orderId=${orderId}`)
+                        } else {
+                            toast.error(verifyData.error || 'Payment verification failed')
+                            setLoading(false)
+                        }
+                    } catch (err) {
+                        console.error('Verification call error:', err)
+                        toast.error('Failed to verify payment. Please contact support.')
+                        setLoading(false)
+                    }
                 },
                 onClose: () => {
                     setLoading(false)
@@ -218,27 +188,10 @@ export default function CheckoutPage() {
             handler.openIframe()
 
         } catch (error) {
-            console.error('Payment error:', error)
+            console.error('Payment init error:', error)
             toast.error('Failed to initialize payment')
             setLoading(false)
         }
-    }
-
-    if (success) {
-        return (
-            <div className="min-h-screen bg-black flex items-center justify-center px-4">
-                <div className="text-center p-8 rounded-2xl bg-white/5 border border-white/10 max-w-md w-full">
-                    <div className="w-16 h-16 rounded-full bg-green-500/20 text-green-500 flex items-center justify-center mx-auto mb-6">
-                        <CheckCircle size={32} />
-                    </div>
-                    <h2 className="text-2xl font-bold text-white mb-2">Order Confirmed!</h2>
-                    <p className="text-white/60 mb-6">Thank you for your purchase. You will receive an email confirmation shortly.</p>
-                    <Link href="/store" className="inline-block px-8 py-3 rounded-full bg-white text-black font-semibold hover:bg-white/90 transition-colors">
-                        Continue Shopping
-                    </Link>
-                </div>
-            </div>
-        )
     }
 
     return (
@@ -293,12 +246,17 @@ export default function CheckoutPage() {
                             <div className="space-y-4 mb-6 max-h-[400px] overflow-y-auto pr-2">
                                 {items.map((item) => {
                                     const price = 'price' in item.item ? item.item.price : 0
+                                    const image =
+                                        ('image_url' in item.item && item.item.image_url) ? item.item.image_url :
+                                            ('cover_image' in item.item && item.item.cover_image) ? item.item.cover_image :
+                                                ('cover_images' in item.item && item.item.cover_images?.[0]) ? item.item.cover_images[0] : null
+
                                     return (
                                         <div key={(item as any).uniqueKey || item.id} className="flex gap-4">
                                             <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-white/5 shrink-0">
-                                                {('image_url' in item.item || 'cover_image' in item.item) && (
+                                                {image && (
                                                     <Image
-                                                        src={(item.item as any).image_url || (item.item as any).cover_image || ''}
+                                                        src={image}
                                                         alt={item.item.title}
                                                         fill className="object-cover"
                                                     />

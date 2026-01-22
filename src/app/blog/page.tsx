@@ -1,4 +1,5 @@
-import { adminDb } from '@/lib/firebase-admin'
+import { db } from '@/lib/firebase'
+import { collection, getDocs, query, orderBy } from 'firebase/firestore'
 import { BlogPost } from '@/lib/types'
 import Link from 'next/link'
 import Image from 'next/image'
@@ -6,18 +7,17 @@ import { Calendar, User, ArrowRight } from 'lucide-react'
 
 async function getBlogPosts(): Promise<BlogPost[]> {
   try {
-    const snapshot = await adminDb
-      .collection('blog_posts')
-      .orderBy('created_at', 'desc')
-      .get()
+    const postsRef = collection(db, 'blog_posts')
+    const q = query(postsRef, orderBy('created_at', 'desc'))
+    const snapshot = await getDocs(q)
 
     return snapshot.docs.map(doc => {
       const data = doc.data()
       return {
         id: doc.id,
         ...data,
-        created_at: data.created_at?.toDate?.().toISOString() || new Date().toISOString(),
-        updated_at: data.updated_at?.toDate?.().toISOString() || new Date().toISOString()
+        created_at: data.created_at?.toDate?.()?.toISOString() || data.created_at || new Date().toISOString(),
+        updated_at: data.updated_at?.toDate?.()?.toISOString() || data.updated_at || new Date().toISOString()
       } as BlogPost
     })
   } catch (error) {

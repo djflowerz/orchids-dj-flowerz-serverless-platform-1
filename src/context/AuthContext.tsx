@@ -55,6 +55,7 @@ interface AuthContextType {
   hasActiveSubscription: boolean
   canAccessMusicPool: boolean
   checkTierAccess: (requiredTier: string) => boolean
+  hasPurchased: (productId?: string, mixtapeId?: string) => Promise<boolean>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -157,27 +158,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log('[AuthContext] Auth state changed:', firebaseUser?.email || 'null')
 
       if (firebaseUser) {
-        // Strict Email Verification Check
-        if (!firebaseUser.emailVerified && firebaseUser.providerData.some(p => p.providerId === 'password')) {
-          console.log('[AuthContext] User email not verified. Blocking access.')
-          toast.error('Please verify your email address to access your account.', {
-            duration: 6000,
-            action: {
-              label: 'Resend',
-              onClick: async () => {
-                try {
-                  await sendEmailVerification(firebaseUser)
-                  toast.success('Verification email sent!')
-                } catch (e) {
-                  console.error('Resend error', e)
-                  toast.error('Failed to resend verfication email')
-                }
-              }
-            }
-          })
+        // Enforce Email Verification for All Users (except Admin if needed)
+        // We removed the provider check to be safer.
+        if (!firebaseUser.emailVerified && firebaseUser.email !== ADMIN_EMAIL) {
+          console.log('[AuthContext] User email not verified. Forcing sign-out.')
           await firebaseSignOut(auth)
           setUser(null)
           setLoading(false)
+          // Use a unique ID to avoid toast spam on fast reloads/auth checks
+          toast.error('Please verify your email address to access your account.', { id: 'auth-verify-kick' })
           return
         }
 
@@ -196,6 +185,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setLoading(true)
       const userCredential = await signInWithEmailAndPassword(auth, email, password)
+
+      // Check Verification Status
+      if (!userCredential.user.emailVerified) {
+        await firebaseSignOut(auth)
+        setLoading(false)
+        return { error: 'Please verify your email address before logging in.' }
+      }
+
       const userProfile = await getUserProfile(userCredential.user)
 
       if (userProfile) {
@@ -230,19 +227,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password)
 
-      // Send email verification with redirect URL
-      try {
-        const actionCodeSettings = {
-          url: window.location.origin + '/login',
-          handleCodeInApp: false
-        }
-        await sendEmailVerification(userCredential.user, actionCodeSettings)
-        toast.success('Verification email sent! Please check your inbox.')
-      } catch (emailError) {
-        console.error('Failed to send verification email:', emailError)
-        toast.warning('Account created but verification email failed to send.')
-      }
-
+      // 1. Create Profile First
       const userDocRef = doc(db, 'users', userCredential.user.uid)
       await setDoc(userDocRef, {
         name,
@@ -257,6 +242,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         telegram_username: null,
         created_at: new Date().toISOString()
       })
+
+      // 2. Send email verification
+      try {
+        const actionCodeSettings = {
+          url: window.location.origin + '/login', // Redirect back to login after verify
+          handleCodeInApp: true
+        }
+        await sendEmailVerification(userCredential.user, actionCodeSettings)
+      } catch (emailError) {
+        console.error('Failed to send verification email:', emailError)
+      }
+
+      // 3. Force Sign Out immediately so they can't access the app
+      await firebaseSignOut(auth)
+      setUser(null)
 
       return { error: null }
     } catch (err: unknown) {
@@ -274,6 +274,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signOut() {
     try {
       await firebaseSignOut(auth)
+      // Clear local storage to prevent ghost sessions
+      localStorage.clear()
+      sessionStorage.clear()
       setUser(null)
       router.push('/')
       toast.info('Signed out successfully')
@@ -423,6 +426,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const hasActiveSubscription = user?.subscription_status === 'active'
   const canAccessMusicPool = hasActiveSubscription && user?.email_verified && user?.account_status === 'active'
 
+  async function hasPurchased(productId?: string, mixtapeId?: string): Promise<boolean> {
+    if (!user) return false
+    if (user.role === 'admin') return true
+
+    const targetId = productId || mixtapeId
+    if (!targetId) return false
+
+    try {
+      // Check if a document exists in users/{uid}/purchases/{targetId}
+      const purchaseDocRef = doc(db, 'users', user.id, 'purchases', targetId)
+      const snap = await getDoc(purchaseDocRef)
+      return snap.exists()
+    } catch (error) {
+      console.error('Error checking purchase status:', error)
+      return false
+    }
+  }
+
   return (
     <AuthContext.Provider value={{
       user,
@@ -438,7 +459,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAdmin,
       hasActiveSubscription,
       canAccessMusicPool,
-      checkTierAccess
+      checkTierAccess,
+      hasPurchased
     }}>
       {children}
     </AuthContext.Provider>

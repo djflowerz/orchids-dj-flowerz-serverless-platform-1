@@ -1,96 +1,80 @@
 "use client"
 
 import { useEffect, useState, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { db } from '@/lib/firebase'
-import { collection, query, where, getDocs, doc, getDoc, limit } from 'firebase/firestore'
-import { CheckCircle, Download, Copy, Key, Package, ArrowRight, Send } from 'lucide-react'
+import { doc, getDoc } from 'firebase/firestore'
+import { CheckCircle, Download, Copy, Key, Package, ArrowRight, Send, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
-import { toast } from 'sonner' // Ensure this imports correctly if it's used
-// Note: toast was imported but unused in original file for copy action, used here for consistency
+import { toast } from 'sonner'
 
-interface PurchaseDetails {
-  product_title: string
-  product_type: 'digital' | 'physical'
-  download_url: string | null
-  download_password: string | null
-  payment_amount: number
-  is_subscription: boolean
+interface OrderItem {
+  product_id: string | null
+  mixtape_id: string | null
+  title: string
+  type: 'product' | 'mixtape'
+  quantity: number
+  // These fields fetched from product/mixtape doc
+  download_url?: string
+  download_password?: string
+  is_subscription?: boolean
+  product_type?: 'digital' | 'physical'
+}
+
+interface OrderDetails {
+  id: string
+  currency: string
+  total_amount: number
+  status: string
+  items: OrderItem[]
 }
 
 function SuccessContent() {
   const searchParams = useSearchParams()
-  const [details, setDetails] = useState<PurchaseDetails | null>(null)
+  const router = useRouter()
+  const [order, setOrder] = useState<OrderDetails | null>(null)
   const [loading, setLoading] = useState(true)
-  const [copied, setCopied] = useState(false)
+  const [error, setError] = useState('')
+  const [copied, setCopied] = useState<string | null>(null)
 
-  const reference = searchParams.get('reference')
-  const type = searchParams.get('type')
+  const orderId = searchParams.get('orderId')
 
   useEffect(() => {
-    async function fetchPurchaseDetails() {
-      if (!reference) {
-        setLoading(false)
-        return
-      }
-
-      if (type === 'subscription') {
-        setDetails({
-          product_title: 'Music Pool Subscription',
-          product_type: 'digital',
-          download_url: null,
-          download_password: null,
-          payment_amount: 0,
-          is_subscription: true
-        })
+    async function fetchOrder() {
+      if (!orderId) {
+        setError('No order ID provided')
         setLoading(false)
         return
       }
 
       try {
-        const q = query(
-          collection(db, 'payments'),
-          where('paystack_reference', '==', reference),
-          limit(1)
-        )
-        const snapshot = await getDocs(q)
+        // Call Secure Backend API
+        const response = await fetch(`/api/order-delivery?orderId=${orderId}`)
 
-        if (!snapshot.empty) {
-          const payment = snapshot.docs[0].data()
-
-          if (payment && payment.item_id) {
-            const productDoc = await getDoc(doc(db, 'products', payment.item_id))
-
-            if (productDoc.exists()) {
-              const product = productDoc.data()
-              setDetails({
-                product_title: product.title,
-                product_type: product.product_type,
-                download_url: product.download_file_path,
-                download_password: product.download_password,
-                payment_amount: payment.amount || 0,
-                is_subscription: false
-              })
-            }
-          }
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || 'Failed to verify order')
         }
-      } catch (error) {
-        console.error('Error fetching purchase details:', error)
+
+        const data = await response.json()
+        setOrder(data)
+
+      } catch (err: any) {
+        console.error('Error fetching order:', err)
+        setError(err.message || 'Failed to load order details')
       } finally {
         setLoading(false)
       }
     }
 
-    fetchPurchaseDetails()
-  }, [reference, type])
+    fetchOrder()
+  }, [orderId, router])
 
-  const copyPassword = () => {
-    if (details?.download_password) {
-      navigator.clipboard.writeText(details.download_password)
-      setCopied(true)
-      toast.success('Password copied!')
-      setTimeout(() => setCopied(false), 2000)
-    }
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text)
+    setCopied(id)
+    toast.success('Copied!')
+    setTimeout(() => setCopied(null), 2000)
   }
 
   if (loading) {
@@ -101,132 +85,113 @@ function SuccessContent() {
     )
   }
 
+  if (error) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center px-4">
+        <div className="text-center p-8 rounded-2xl bg-white/5 border border-red-500/20 max-w-md w-full">
+          <AlertTriangle size={40} className="mx-auto text-red-500 mb-4" />
+          <h2 className="text-xl font-bold text-white mb-2">Access Denied</h2>
+          <p className="text-white/60 mb-6">{error}</p>
+          <Link href="/store" className="inline-block px-8 py-3 rounded-full bg-white text-black font-semibold hover:bg-white/90 transition-colors">
+            Return to Store
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-black flex items-center justify-center px-4 py-12">
-      <div className="max-w-lg w-full">
-        <div className="text-center mb-8">
+      <div className="max-w-2xl w-full">
+        <div className="text-center mb-12">
           <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center">
             <CheckCircle size={40} className="text-white" />
           </div>
           <h1 className="font-display text-4xl text-white mb-2">PAYMENT SUCCESSFUL</h1>
-          <p className="text-white/60">Thank you for your purchase!</p>
+          <p className="text-white/60">Thank you for your purchase! Order #{order?.id.slice(0, 8)}</p>
         </div>
 
-        {details ? (
-          <div className="space-y-6">
-            <div className="p-6 rounded-2xl bg-white/5 border border-white/10">
+        <div className="space-y-6">
+          {order?.items.map((item, index) => (
+            <div key={index} className="p-6 rounded-2xl bg-white/5 border border-white/10">
               <div className="flex items-center gap-3 mb-4">
                 <Package size={24} className="text-fuchsia-400" />
-                <h2 className="text-white font-semibold text-lg">{details.product_title}</h2>
+                <h2 className="text-white font-semibold text-lg">{item.title}</h2>
+                {item.quantity > 1 && <span className="text-xs bg-white/10 px-2 py-0.5 rounded text-white/60">x{item.quantity}</span>}
               </div>
 
-              {details.payment_amount > 0 && (
-                <p className="text-white/50 text-sm mb-4">
-                  Amount paid: <span className="text-white font-semibold">KSh {(details.payment_amount / 100).toLocaleString()}</span>
-                </p>
-              )}
-
-              {details.is_subscription && (
+              {/* Digital Download */}
+              {item.product_type === 'digital' && item.download_url && (
                 <div className="space-y-4">
-                  <div className="p-4 rounded-xl bg-cyan-500/10 border border-cyan-500/30">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Send size={18} className="text-cyan-400" />
-                      <span className="text-cyan-400 font-semibold">Telegram Access</span>
-                    </div>
-                    <p className="text-white/60 text-sm">
-                      Go to your profile and link your Telegram username to get added to our exclusive Music Pool channels.
-                    </p>
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <a
+                      href={item.download_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-fuchsia-500 to-cyan-500 text-white font-semibold hover:opacity-90 transition-all"
+                    >
+                      <Download size={20} />
+                      Download File
+                    </a>
                   </div>
-                  <Link
-                    href="/profile"
-                    className="flex items-center justify-center gap-2 w-full py-3 rounded-full bg-gradient-to-r from-fuchsia-500 to-cyan-500 text-white font-semibold hover:opacity-90 transition-all"
-                  >
-                    Link Telegram
-                    <ArrowRight size={18} />
-                  </Link>
-                </div>
-              )}
 
-              {details.product_type === 'digital' && details.download_url && (
-                <div className="space-y-4">
-                  <a
-                    href={details.download_url}
-                    download
-                    className="flex items-center justify-center gap-2 w-full py-4 rounded-xl bg-gradient-to-r from-fuchsia-500 to-cyan-500 text-white font-semibold hover:opacity-90 transition-all"
-                  >
-                    <Download size={20} />
-                    Download Now
-                  </a>
-
-                  {details.download_password && (
+                  {item.download_password && (
                     <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30">
-                      <div className="flex items-center gap-2 mb-3">
-                        <Key size={18} className="text-amber-400" />
-                        <span className="text-amber-400 font-semibold">Download Password</span>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Key size={16} className="text-amber-400" />
+                        <span className="text-amber-400 text-sm font-semibold">Password</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <code className="flex-1 px-4 py-3 rounded-lg bg-black/50 text-white font-mono text-lg tracking-wider">
-                          {details.download_password}
+                        <code className="flex-1 px-3 py-2 rounded bg-black/50 text-white font-mono text-sm tracking-wide break-all">
+                          {item.download_password}
                         </code>
                         <button
-                          onClick={copyPassword}
-                          className="p-3 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-all"
+                          onClick={() => copyToClipboard(item.download_password!, index.toString())}
+                          className="p-2 rounded bg-white/10 text-white hover:bg-white/20 transition-all"
                         >
-                          <Copy size={18} className={copied ? 'text-green-400' : ''} />
+                          <Copy size={16} className={copied === index.toString() ? 'text-green-400' : ''} />
                         </button>
                       </div>
-                      <p className="text-white/50 text-xs mt-3">
-                        Use this password to extract/open the downloaded file.
-                      </p>
                     </div>
                   )}
                 </div>
               )}
 
-              {details.product_type === 'physical' && (
+              {/* Physical Product */}
+              {item.product_type === 'physical' && (
                 <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/30">
-                  <p className="text-blue-400 font-semibold mb-2">Physical Product</p>
-                  <p className="text-white/60 text-sm">
-                    Your order has been confirmed. We&apos;ll process and ship it within 2-3 business days.
-                    You&apos;ll receive tracking information via email.
+                  <p className="text-blue-400 font-semibold mb-1 text-sm">Physical Item</p>
+                  <p className="text-white/60 text-xs">
+                    We&apos;ll create a shipping label and update you via email.
                   </p>
                 </div>
               )}
-            </div>
 
-            <div className="p-4 rounded-xl bg-white/5 border border-white/10">
-              <p className="text-white/50 text-sm text-center">
-                Reference: <span className="text-white font-mono">{reference}</span>
-              </p>
-            </div>
+              {/* Fallback if no type or url */}
+              {item.product_type === 'digital' && !item.download_url && (
+                <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+                  <p className="text-white/50 text-sm">Download link not available directly. Please check your email.</p>
+                </div>
+              )}
 
-            <div className="flex flex-col sm:flex-row gap-3">
-              <Link
-                href="/store"
-                className="flex-1 py-3 rounded-full bg-white/5 text-white font-semibold hover:bg-white/10 transition-all text-center"
-              >
-                Continue Shopping
-              </Link>
-              <Link
-                href="/profile"
-                className="flex-1 py-3 rounded-full bg-white/5 text-white font-semibold hover:bg-white/10 transition-all text-center"
-              >
-                View Orders
-              </Link>
             </div>
-          </div>
-        ) : (
-          <div className="text-center p-8 rounded-2xl bg-white/5 border border-white/10">
-            <p className="text-white/60 mb-4">Your payment was successful!</p>
+          ))}
+
+          <div className="flex flex-col sm:flex-row gap-3 pt-6">
             <Link
               href="/store"
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-gradient-to-r from-fuchsia-500 to-cyan-500 text-white font-semibold hover:opacity-90 transition-all"
+              className="flex-1 py-3 rounded-full bg-white/5 text-white font-semibold hover:bg-white/10 transition-all text-center"
             >
               Continue Shopping
-              <ArrowRight size={18} />
+            </Link>
+            <Link
+              href="/profile"
+              className="flex-1 py-3 rounded-full bg-white/5 text-white font-semibold hover:bg-white/10 transition-all text-center"
+            >
+              View All Orders
             </Link>
           </div>
-        )}
+        </div>
       </div>
     </div>
   )

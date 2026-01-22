@@ -163,6 +163,61 @@ interface SiteSettings {
 
 type TabType = 'dashboard' | 'users' | 'products' | 'mixtapes' | 'music-pool' | 'subscriptions' | 'bookings' | 'payments' | 'tips' | 'telegram' | 'reports' | 'settings' | 'shipping'
 
+
+function UserDetailModal({ user, onClose }: { user: UserData; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <div className="bg-[#12121a] rounded-2xl border border-white/10 w-full max-w-lg">
+        <div className="p-6 border-b border-white/10 flex items-center justify-between">
+          <h3 className="text-lg font-semibold">User Details</h3>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/10"><X size={18} /></button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="flex items-center gap-4 mb-4">
+            <div className="w-16 h-16 rounded-full bg-violet-500/20 text-violet-400 flex items-center justify-center text-2xl font-bold">
+              {user.name?.charAt(0) || 'U'}
+            </div>
+            <div>
+              <h4 className="text-xl font-semibold">{user.name || 'No Name'}</h4>
+              <p className="text-white/50">{user.email}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="p-4 rounded-xl bg-white/5">
+              <p className="text-sm text-white/50 mb-1">Role</p>
+              <p className="font-medium capitalize">{user.role || 'User'}</p>
+            </div>
+            <div className="p-4 rounded-xl bg-white/5">
+              <p className="text-sm text-white/50 mb-1">Status</p>
+              <p className="font-medium capitalize">{user.account_status || 'Active'}</p>
+            </div>
+            <div className="p-4 rounded-xl bg-white/5">
+              <p className="text-sm text-white/50 mb-1">Subscription</p>
+              <p className="font-medium capitalize">{user.subscription_status || 'None'}</p>
+            </div>
+            <div className="p-4 rounded-xl bg-white/5">
+              <p className="text-sm text-white/50 mb-1">Joined</p>
+              <p className="font-medium">{new Date(user.created_at).toLocaleDateString()}</p>
+            </div>
+          </div>
+
+          {user.subscription_tier && (
+            <div className="p-4 rounded-xl bg-violet-500/10 border border-violet-500/20">
+              <p className="text-sm text-violet-400 mb-1">Current Tier</p>
+              <p className="font-medium text-white">{user.subscription_tier}</p>
+            </div>
+          )}
+
+        </div>
+        <div className="p-6 border-t border-white/10 flex justify-end">
+          <button onClick={onClose} className="px-6 py-2 rounded-xl bg-white/10 hover:bg-white/20 transition-all">Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AdminContent() {
   const { user, loading, isAdmin, signOut } = useAuth()
   const router = useRouter()
@@ -217,6 +272,8 @@ function AdminContent() {
   const [showChannelModal, setShowChannelModal] = useState(false)
   const [showPaymentConfigModal, setShowPaymentConfigModal] = useState<'paystack' | 'mpesa' | null>(null)
   const [showEmailTemplateModal, setShowEmailTemplateModal] = useState<string | null>(null)
+  const [showUserModal, setShowUserModal] = useState(false)
+  const [selectedUser, setSelectedUser] = useState<UserData | null>(null)
 
   useEffect(() => {
     if (!loading && !user) {
@@ -577,6 +634,7 @@ function AdminContent() {
               getStatusBadge={getStatusBadge}
               onUpdateStatus={handleUpdateUserStatus}
               onUpdateRole={handleUpdateUserRole}
+              onViewUser={(u: UserData) => { setSelectedUser(u); setShowUserModal(true) }}
             />
           )}
 
@@ -700,6 +758,10 @@ function AdminContent() {
           )}
         </div>
       </main>
+
+      {showUserModal && selectedUser && (
+        <UserDetailModal user={selectedUser} onClose={() => setShowUserModal(false)} />
+      )}
 
       {showProductModal && (
         <ProductModal
@@ -959,7 +1021,7 @@ function DashboardTab({ stats, bookings, transactions, formatCurrency, formatDat
   )
 }
 
-function UsersTab({ users, searchQuery, formatDate, getStatusBadge, onUpdateStatus, onUpdateRole }: any) {
+function UsersTab({ users, searchQuery, formatDate, getStatusBadge, onUpdateStatus, onUpdateRole, onViewUser }: any) {
   const filteredUsers = users.filter((u: UserData) =>
     u.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     u.email?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -1024,7 +1086,7 @@ function UsersTab({ users, searchQuery, formatDate, getStatusBadge, onUpdateStat
                   </td>
                   <td className="p-4 text-white/70 text-sm">{formatDate(u.created_at)}</td>
                   <td className="p-4">
-                    <button className="p-2 rounded-lg hover:bg-white/10 text-white/50 hover:text-white">
+                    <button onClick={() => onViewUser(u)} className="p-2 rounded-lg hover:bg-white/10 text-white/50 hover:text-white">
                       <Eye size={16} />
                     </button>
                   </td>
@@ -2312,6 +2374,8 @@ function ProductModal({ product, onClose, onSave }: { product: Product | null; o
     status: product?.status || 'published',
     category: product?.category || '',
     cover_images: product?.cover_images || [],
+    is_free: product?.is_free ?? false,
+    is_paid: product?.is_paid ?? true,
 
     // Digital
     version: product?.version || '',
@@ -2438,7 +2502,7 @@ function ProductModal({ product, onClose, onSave }: { product: Product | null; o
         </div>
 
         <div className="p-6 space-y-6">
-          {error && <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-sm">{error}</div>}
+          {error && <div role="alert" aria-live="assertive" className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-sm">{error}</div>}
 
           {/* Images */}
           <div>

@@ -339,7 +339,7 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
           <p className="text-white/50">No products found matching your criteria.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
           {filteredProducts.map((product, i) => {
             const pType = product.product_type || (product as any).type || 'digital'
             const stock = product.stock_quantity !== undefined ? product.stock_quantity : (product as any).stock

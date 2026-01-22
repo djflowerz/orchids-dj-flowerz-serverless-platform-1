@@ -36,6 +36,8 @@ export interface Mixtape {
   created_at: string
   audio_download_url?: string | null
   video_download_url?: string | null
+  download_url?: string | null // Primary download for secured content (zip)
+  download_password?: string | null
   embed_url?: string | null
 }
 

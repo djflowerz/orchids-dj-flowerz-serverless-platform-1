@@ -134,8 +134,10 @@ export default function CartPage() {
           {items.map((item) => {
             const isProduct = item.type === 'product'
             const title = 'title' in item.item ? item.item.title : ''
-            const image = 'image_url' in item.item ? item.item.image_url :
-              ('cover_image' in item.item ? item.item.cover_image : null)
+            const image =
+              ('image_url' in item.item && item.item.image_url) ? item.item.image_url :
+                ('cover_image' in item.item && item.item.cover_image) ? item.item.cover_image :
+                  ('cover_images' in item.item && item.item.cover_images?.[0]) ? item.item.cover_images[0] : null
             const price = 'price' in item.item ? item.item.price : 0
             const productType = isProduct && 'product_type' in item.item ? item.item.product_type : null
 

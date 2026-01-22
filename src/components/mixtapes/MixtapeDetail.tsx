@@ -16,7 +16,7 @@ export function MixtapeDetail({ mixtape }: { mixtape: Mixtape }) {
   const { addToCart } = useCart()
   const [purchased, setPurchased] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [showPlayer, setShowPlayer] = useState(false)
+  const [showPlayer, setShowPlayer] = useState(true)
 
   useEffect(() => {
     async function checkPurchase() {
@@ -41,7 +41,7 @@ export function MixtapeDetail({ mixtape }: { mixtape: Mixtape }) {
     toast.success('Link copied to clipboard!')
   }
 
-  const tracklist = Array.isArray(mixtape.tracklist) ? mixtape.tracklist : 
+  const tracklist = Array.isArray(mixtape.tracklist) ? mixtape.tracklist :
     (typeof mixtape.tracklist === 'string' ? JSON.parse(mixtape.tracklist) : [])
 
   const audioTrack = mixtape.audio_url ? {
@@ -62,7 +62,7 @@ export function MixtapeDetail({ mixtape }: { mixtape: Mixtape }) {
           className="object-cover"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent" />
-        
+
         <div className="absolute top-4 left-4">
           <Link href="/mixtapes" className="flex items-center gap-2 text-white/70 hover:text-white transition-colors">
             <ArrowLeft size={20} />
@@ -111,7 +111,7 @@ export function MixtapeDetail({ mixtape }: { mixtape: Mixtape }) {
               )}
               <div className="flex items-center gap-2">
                 <Download size={16} />
-                {mixtape.download_count.toLocaleString()} downloads
+                {(mixtape.download_count || 0).toLocaleString()} downloads
               </div>
             </div>
 
@@ -119,40 +119,74 @@ export function MixtapeDetail({ mixtape }: { mixtape: Mixtape }) {
               <p className="text-white/70 mb-8">{mixtape.description}</p>
             )}
 
-              <div className="flex flex-wrap gap-3 mb-8">
-                {mixtape.audio_url && (
-                  <button
-                    onClick={() => setShowPlayer(true)}
-                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-fuchsia-500 to-cyan-500 rounded-full text-white font-semibold hover:opacity-90 transition-all"
-                  >
-                    <Headphones size={20} />
-                    Stream Now
-                  </button>
-                )}
+            <div className="flex flex-wrap gap-3 mb-8">
+              {mixtape.audio_url && (
+                <button
+                  onClick={() => setShowPlayer(!showPlayer)}
+                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-fuchsia-500 to-cyan-500 rounded-full text-white font-semibold hover:opacity-90 transition-all"
+                >
+                  <Headphones size={20} />
+                  {showPlayer ? 'Hide Player' : 'Stream Now'}
+                </button>
+              )}
+              {mixtape.audio_url && (
                 <a
-                  href={mixtape.audio_url || '#'}
+                  href={mixtape.audio_url}
                   download
                   className="flex items-center gap-2 px-6 py-3 bg-white/10 border border-white/10 rounded-full text-white font-semibold hover:bg-white/20 transition-all"
                 >
                   <Download size={20} />
-                  Download
+                  Download Audio
                 </a>
-                <button
-                  onClick={handleShare}
-                  className="flex items-center gap-2 px-4 py-3 bg-white/5 border border-white/10 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-all"
-                >
-                  <Share2 size={20} />
-                </button>
-              </div>
-
-              {showPlayer && audioTrack && (
-                <div className="mb-8">
-                  <AudioPlayer 
-                    tracks={[audioTrack]} 
-                    autoPlay={true}
-                  />
-                </div>
               )}
+              {/* Main Download Button for Mixtape File (e.g. ZIP) */}
+              {mixtape.download_url && canAccess && (
+                <a
+                  href={mixtape.download_url}
+                  download
+                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full text-white font-semibold hover:opacity-90 transition-all shadow-lg shadow-green-500/20"
+                >
+                  <Download size={20} />
+                  Download Full Mixtape
+                </a>
+              )}
+              {/* Pay to Unlock Button */}
+              {!canAccess && (
+                <button
+                  onClick={handleAddToCart}
+                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-fuchsia-500 to-cyan-500 rounded-full text-white font-semibold hover:opacity-90 transition-all shadow-lg shadow-fuchsia-500/20"
+                >
+                  <ShoppingCart size={20} />
+                  Buy to Download {mixtape.price ? `- ${formatCurrency(mixtape.price)}` : ''}
+                </button>
+              )}
+              {mixtape.video_url && canAccess && (
+                <a
+                  href={mixtape.video_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-6 py-3 bg-white/10 border border-white/10 rounded-full text-white font-semibold hover:bg-white/20 transition-all"
+                >
+                  <Download size={20} />
+                  Download Video
+                </a>
+              )}
+              <button
+                onClick={handleShare}
+                className="flex items-center gap-2 px-4 py-3 bg-white/5 border border-white/10 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-all"
+              >
+                <Share2 size={20} />
+              </button>
+            </div>
+
+            {showPlayer && audioTrack && (
+              <div className="mb-8">
+                <AudioPlayer
+                  tracks={[audioTrack]}
+                  autoPlay={true}
+                />
+              </div>
+            )}
 
             {tracklist.length > 0 && (
               <div className="bg-white/5 rounded-2xl p-6 border border-white/10">

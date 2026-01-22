@@ -302,5 +302,46 @@ Before marking any issue as "fixed":
 
 ---
 
-**Last Updated:** 2026-01-21  
-**Next Review:** After user tests authentication fixes
+## Recent Fixes (Jan 22, 2026) - Addressed TestSprite Report
+
+### 1. Checkout & Payment Confirmation
+- **Fixed:** The checkout flow was failing because the frontend waited for a webhook that might be delayed or misconfigured in the test environment.
+- **Solution:** Updated `src/app/checkout/page.tsx` to immediately call a backend API (`/api/verify-payment`) upon Paystack client-side success.
+- **Backend:** Updated `src/app/api/verify-payment/route.ts` to use `nodejs` runtime and `firebase-admin` to securely update the Order status to 'paid' in Firestore immediately upon verification.
+
+### 2. Admin Product Validation Accessibility
+- **Fixed:** TestSprite reported that accessibility announcements were missing for validation errors in the Product Modal.
+- **Solution:** Added `role="alert"` and `aria-live="assertive"` to the error message container in `src/app/admin/page.tsx`.
+
+### 3. Admin User Management
+- **Fixed:** The "View User" (Eye icon) button in the User Management tab was non-functional.
+- **Solution:** Implemented `UserDetailModal` to display comprehensive user information, including subscription tier and status. Wired it to the `UsersTab` view button.
+
+### 4. Broken Links (Footer)
+- **Fixed:** Footer contained generic placeholders pointing to instagram.com, etc.
+- **Solution:** Updated `src/components/Footer.tsx` to use internal links (`#`) for social icons to prevent navigating users to 404s or generic pages, until official social handles are provided.
+
+### 5. Secure Download Delivery & Real-time Payment
+- **Fixed:** Implemented a secure "Locked Page" mechanism for delivery. Direct download links and passwords are no longer exposed on the client side.
+- **Solution:** 
+    - **Checkout Listener:** Frontend now uses a real-time Firestore listener to verify payment status before redirecting to success page.
+    - **Locked Page:** `/payment-success` page authenticates the order via a new secure backend endpoint (`/api/order-delivery`) which only returns sensitive download URLs/passwords if the status is strictly 'paid'.
+    - **Firestore Rules:** Updated security rules to protect `privateData` subcollections, ensuring only valid purchasers or admins can read sensitive product data.
+    - **Edge Compatibility:** All API routes (`api/paystack/webhook`, `api/order-delivery`) refactored to use Edge Runtime with standard Web Crypto API for compatibility with Cloudflare Pages.
+
+### 6. Subscribe & Tip Jar Secure Verification
+- **Fixed:** Subscribe and Tip Jar pages relied on client-side callbacks without backend verification, leading to potential data inconsistencies and "missing confirmation" errors.
+- **Solution:** Refactored `src/app/subscribe/page.tsx` and `src/app/tip-jar/page.tsx` to:
+    1. Create a "pending" record in Firestore *before* payment.
+    2. Pass the record ID as the Paystack reference.
+    3. Use the `/api/verify-payment` endpoint (updated to support dynamic fields/collections) in the callback to verify the transaction server-side.
+    4. Provide robust loading feedback (Toasts) and only redirect upon successful verification.
+
+**Next Steps:**
+1. **Verify Deployment:** Check `https://djflowerz-site.pages.dev` to ensure the new flow works end-to-end.
+2. **Re-run TestSprite:** To confirm score improvement.
+
+---
+
+**Last Updated:** 2026-01-22 (All Priorities 1-4 Addressed)
+**Next Review:** Final Deployment verification.

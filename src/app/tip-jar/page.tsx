@@ -75,12 +75,7 @@ export default function TipJarPage() {
     setProcessing(true)
 
     try {
-      // Generate reference client-side for Static Deployment compatibility
-      const reference = `tip_${Date.now()}_${Math.random().toString(36).substring(7)}`
-
       const activeKey = paystackKey || process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY
-
-      console.log('Initializing Paystack with key:', activeKey ? '***' + activeKey.slice(-4) : 'MISSING')
 
       if (!activeKey) {
         toast.error('Payment system not configured (Missing Public Key)')
@@ -88,54 +83,67 @@ export default function TipJarPage() {
         return
       }
 
+      console.log('Initializing Paystack with key:', activeKey ? '***' + activeKey.slice(-4) : 'MISSING')
+
+      // 1. Create Pending Tip Record
+      console.log('[TipJar] Creating pending tip...')
+      const tipDoc = await addDoc(collection(db, 'tips'), {
+        email: tipEmail,
+        amount: tipAmount,
+        status: 'pending',
+        createdAt: serverTimestamp(),
+        userId: user?.id || 'anonymous'
+      })
+      const tipId = tipDoc.id
+
       const handler = window.PaystackPop.setup({
         key: activeKey,
         email: tipEmail,
         amount: tipAmount,
         currency: 'KES',
-        ref: reference,
-        callback: function (response: { reference: string }) {
+        ref: tipId, // Reference is Firestore Doc ID
+        callback: async function (response: { reference: string }) {
           console.log('[TipJar] Paystack callback triggered:', response)
+          toast.loading('Verifying tip...')
 
-          const processTip = async () => {
-            try {
-              console.log('[TipJar] Saving tip to Firestore...')
-
-              // Record tip in Firestore directly (Client SDK)
-              await addDoc(collection(db, 'tips'), {
-                email: tipEmail,
-                amount: tipAmount,
+          try {
+            // 2. Verify via Backend
+            const verifyRes = await fetch('/api/verify-payment', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
                 reference: response.reference,
-                status: 'success', // Assumed success from callback
-                createdAt: serverTimestamp(),
-                userId: user?.id || 'anonymous'
+                orderId: tipId,
+                collection: 'tips'
               })
+            })
 
-              console.log('[TipJar] Tip saved successfully!')
-              toast.success('🎉 Thank you for your support!', {
-                duration: 3000,
-              })
+            const verifyData = await verifyRes.json()
 
-              // Wait 2 seconds before redirect to ensure user sees the message
-              setTimeout(() => {
-                router.push(`/payment-success?reference=${response.reference}`)
-              }, 2000)
-
-            } catch (error) {
-              console.error('[TipJar] Error saving tip:', error)
-              // Even if save fails, payment succeeded
-              toast.success('🎉 Thank you for your support!', {
-                duration: 3000,
-              })
-
-              setTimeout(() => {
-                router.push(`/payment-success?reference=${response.reference}`)
-              }, 2000)
-            } finally {
-              setProcessing(false)
+            if (!verifyRes.ok || !verifyData.verified) {
+              throw new Error(verifyData.error || 'Tip verification failed')
             }
+
+            console.log('[TipJar] Tip verified successfully!')
+            toast.dismiss()
+            toast.success('🎉 Thank you for your support!', {
+              duration: 3000,
+            })
+
+            // Redirect to generic payment success page or stay?
+            // User requested confirmation message displayed.
+            // Original code redirected to /payment-success?reference=...
+            // We can use that.
+            setTimeout(() => {
+              router.push(`/payment-success?reference=${response.reference}&type=tip`)
+            }, 2000)
+
+          } catch (error: any) {
+            console.error('[TipJar] Verification error:', error)
+            toast.dismiss()
+            toast.error(error.message || 'Tip verification failed')
+            setProcessing(false)
           }
-          processTip()
         },
         onClose: function () {
           setProcessing(false)

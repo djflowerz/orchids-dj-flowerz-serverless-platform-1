@@ -10,7 +10,7 @@
         ]
     },
     "firestore": {
-        "rules": "firestore-security-rules.txt"
+        "rules": "firestore.rules"
     },
     "storage": {
         "rules": "storage.rules"

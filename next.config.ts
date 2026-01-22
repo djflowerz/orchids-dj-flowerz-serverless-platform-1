@@ -4,6 +4,7 @@ const loaderPath = require.resolve('orchids-visual-edits/loader.js');
 
 const nextConfig: NextConfig = {
   images: {
+    unoptimized: true, // Required for Cloudflare Pages compatibility
     remotePatterns: [
       {
         protocol: 'https',

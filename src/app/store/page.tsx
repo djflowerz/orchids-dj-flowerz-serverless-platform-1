@@ -1,22 +1,26 @@
-import { adminDb } from '@/lib/firebase-admin'
+import { db } from '@/lib/firebase'
+import { collection, getDocs, query, orderBy, where } from 'firebase/firestore'
 import { Product } from '@/lib/types'
 import { ProductsList } from '@/components/store/ProductsList'
 
 async function getProducts(): Promise<Product[]> {
   try {
-    const snapshot = await adminDb
-      .collection('products')
-      .orderBy('created_at', 'desc')
-      .get()
+    const productsRef = collection(db, 'products')
+    const q = query(productsRef, orderBy('created_at', 'desc'))
+    const snapshot = await getDocs(q)
 
     return snapshot.docs
-      .filter(doc => doc.data().status === 'published' || !doc.data().status) // Allow if status missing (legacy) or published
+      .filter(doc => {
+        const d = doc.data()
+        // Allow if status missing (legacy) or published
+        return !d.status || d.status === 'published'
+      })
       .map(doc => {
         const data = doc.data()
         return {
           id: doc.id,
           ...data,
-          created_at: data.created_at?.toDate?.().toISOString() || new Date().toISOString()
+          created_at: data.created_at?.toDate?.()?.toISOString() || data.created_at || new Date().toISOString()
         } as Product
       })
   } catch (error) {

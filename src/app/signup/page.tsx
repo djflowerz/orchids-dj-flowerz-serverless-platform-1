@@ -39,7 +39,7 @@ export default function SignupPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     if (password !== confirmPassword) {
       toast.error('Passwords do not match')
       return
@@ -60,7 +60,9 @@ export default function SignupPage() {
       return
     }
 
-    toast.success('Account created! Please check your email to verify your account.')
+    toast.info('Account created! Please check your email to verify your account before logging in.', {
+      duration: 5000,
+    })
     router.push('/login')
   }
 
@@ -77,17 +79,19 @@ export default function SignupPage() {
           <p className="text-white/60">Create your account</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" autoComplete="on">
           <div>
             <label className="block text-white/70 text-sm mb-2">Name</label>
             <div className="relative">
               <User size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40" />
               <input
                 type="text"
+                name="name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Your name"
                 required
+                autoComplete="name"
                 className="w-full pl-11 pr-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-white/40 focus:outline-none focus:border-fuchsia-500/50"
               />
             </div>
@@ -99,10 +103,12 @@ export default function SignupPage() {
               <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40" />
               <input
                 type="email"
+                name="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="your@email.com"
                 required
+                autoComplete="username"
                 className="w-full pl-11 pr-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-white/40 focus:outline-none focus:border-fuchsia-500/50"
               />
             </div>
@@ -114,10 +120,12 @@ export default function SignupPage() {
               <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40" />
               <input
                 type={showPassword ? 'text' : 'password'}
+                name="newPassword"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 required
+                autoComplete="new-password"
                 className="w-full pl-11 pr-12 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-white/40 focus:outline-none focus:border-fuchsia-500/50"
               />
               <button
@@ -128,22 +136,21 @@ export default function SignupPage() {
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
-            
+
             {password && (
               <div className="mt-3 space-y-2">
                 <div className="flex items-center gap-2">
                   <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                    <div 
+                    <div
                       className={`h-full ${passwordStrength.color} transition-all duration-300`}
                       style={{ width: passwordStrength.width }}
                     />
                   </div>
-                  <span className={`text-xs capitalize ${
-                    passwordStrength.level === 'weak' ? 'text-red-400' :
+                  <span className={`text-xs capitalize ${passwordStrength.level === 'weak' ? 'text-red-400' :
                     passwordStrength.level === 'fair' ? 'text-orange-400' :
-                    passwordStrength.level === 'good' ? 'text-yellow-400' :
-                    'text-green-400'
-                  }`}>
+                      passwordStrength.level === 'good' ? 'text-yellow-400' :
+                        'text-green-400'
+                    }`}>
                     {passwordStrength.level}
                   </span>
                 </div>
@@ -179,13 +186,12 @@ export default function SignupPage() {
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="••••••••"
                 required
-                className={`w-full pl-11 pr-12 py-3 rounded-xl bg-white/5 border text-white placeholder:text-white/40 focus:outline-none transition-colors ${
-                  confirmPassword 
-                    ? passwordsMatch 
-                      ? 'border-green-500/50' 
-                      : 'border-red-500/50'
-                    : 'border-white/10 focus:border-fuchsia-500/50'
-                }`}
+                className={`w-full pl-11 pr-12 py-3 rounded-xl bg-white/5 border text-white placeholder:text-white/40 focus:outline-none transition-colors ${confirmPassword
+                  ? passwordsMatch
+                    ? 'border-green-500/50'
+                    : 'border-red-500/50'
+                  : 'border-white/10 focus:border-fuchsia-500/50'
+                  }`}
               />
               <button
                 type="button"

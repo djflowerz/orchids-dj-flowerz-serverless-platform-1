@@ -100,13 +100,6 @@ export default function SubscribePage() {
     if (!selectedTier) return
 
     try {
-      // Validate inputs
-      const subscribeEmail = user?.email || email
-      // ... (validation already there)
-
-      // Generate Reference Client Side
-      const reference = `SUB-${Date.now()}-${Math.random().toString(36).substring(7)}`
-
       const activeKey = paystackKey || process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY
 
       if (!activeKey) {
@@ -115,47 +108,64 @@ export default function SubscribePage() {
         return
       }
 
-      console.log('Initializing Paystack for subscription with key:', activeKey ? '***' + activeKey.slice(-4) : 'MISSING')
+      // 1. Create PENDING Subscription Record
+      console.log('[Subscribe] Creating pending subscription...')
+      const startDate = new Date()
+      const endDate = new Date()
+      endDate.setDate(startDate.getDate() + getDurationDays(selectedTier.duration))
+
+      const subData = {
+        user_id: user?.id || 'guest',
+        user_email: subscribeEmail,
+        tier: selectedTier.id,
+        plan_name: selectedTier.name,
+        status: 'pending', // PENDING initially
+        amount: selectedTier.price,
+        currency: 'KES',
+        start_date: startDate.toISOString(),
+        end_date: endDate.toISOString(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+
+      const subRef = await addDoc(collection(db, 'subscriptions'), subData)
+      const subId = subRef.id // Use this as reference for Paystack
+
+      console.log('Initializing Paystack for subscription:', subId)
 
       const handler = window.PaystackPop.setup({
         key: activeKey,
         email: subscribeEmail,
         amount: selectedTier.price, // Cents
         currency: 'KES',
-        ref: reference,
+        ref: subId, // Reference is Firestore Doc ID
         callback: async function (response: { reference: string }) {
-          // Verify Client Side (Trust Callback)
           console.log('[Subscribe] Paystack callback triggered:', response)
+          toast.loading('Verifying subscription payment...')
 
           try {
-            console.log('[Subscribe] Creating subscription record...')
-            const startDate = new Date()
-            const endDate = new Date()
-            endDate.setDate(startDate.getDate() + getDurationDays(selectedTier.duration))
+            // 2. Verify Payment via Backend API
+            const verifyRes = await fetch('/api/verify-payment', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                reference: response.reference,
+                orderId: subId,
+                collection: 'subscriptions' // Tell API to update 'subscriptions' collection
+              })
+            })
 
-            const subData = {
-              id: reference, // Use ref as ID or auto-gen
-              user_id: user?.id || 'guest_sub_' + reference,
-              user_email: subscribeEmail,
-              tier: selectedTier.id,
-              plan_name: selectedTier.name,
-              status: 'active',
-              amount: selectedTier.price,
-              currency: 'KES',
-              reference: response.reference,
-              start_date: startDate.toISOString(),
-              end_date: endDate.toISOString(),
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
+            const verifyData = await verifyRes.json()
+
+            if (!verifyRes.ok || !verifyData.verified) {
+              throw new Error(verifyData.error || 'Payment verification failed')
             }
 
-            // Add to 'subscriptions' collection
-            await addDoc(collection(db, 'subscriptions'), subData)
-            console.log('[Subscribe] Subscription record created successfully')
+            console.log('[Subscribe] Payment verified. Updating user profile...')
 
-            // Update User Profile to reflect subscription immediately
+            // 3. Update User Profile Client-Side (if logged in)
+            // Note: Ideally this should be server-side, but keeping consistent with existing architecture for now.
             if (user && user.id) {
-              console.log('[Subscribe] Updating user profile...')
               const userRef = doc(db, 'users', user.id)
               try {
                 await updateDoc(userRef, {
@@ -166,42 +176,37 @@ export default function SubscribePage() {
                 console.log('[Subscribe] User profile updated successfully')
               } catch (uErr) {
                 console.warn('[Subscribe] Could not update user profile directly', uErr)
+                // Don't fail the whole flow if this optional step fails, backend might handle it later or admin can fix
               }
             }
 
-            // Show success message and wait before redirect
+            toast.dismiss()
             toast.success('🎉 Welcome to the crew! Subscription activated.', {
               duration: 3000,
             })
-            console.log('[Subscribe] Success! Redirecting to music pool in 2 seconds...')
 
-            // Wait 2 seconds to ensure user sees the success message
+            // 4. Redirect
             setTimeout(() => {
               window.location.href = '/music-pool'
             }, 2000)
 
-          } catch (error) {
-            console.error('[Subscribe] Subscription save error:', error)
-            toast.error('Payment successful, but saving subscription failed. Please contact support.', {
-              duration: 5000,
-            })
-
-            // Wait before redirect even on error
-            setTimeout(() => {
-              window.location.href = '/music-pool'
-            }, 3000)
-          } finally {
+          } catch (error: any) {
+            console.error('[Subscribe] Verification error:', error)
+            toast.dismiss()
+            toast.error(error.message || 'Subscription verification failed. Please contact support.')
             setProcessing(false)
           }
         },
         onClose: () => {
           setProcessing(false)
+          toast.info('Payment cancelled')
         }
       })
 
       handler.openIframe()
     } catch (e: any) {
-      toast.error('Failed to process subscription')
+      console.error('Subscription init error:', e)
+      toast.error('Failed to process subscription initialization')
       setProcessing(false)
     }
   }

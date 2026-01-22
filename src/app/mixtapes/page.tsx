@@ -1,20 +1,20 @@
-import { adminDb } from '@/lib/firebase-admin'
+import { db } from '@/lib/firebase'
+import { collection, getDocs, query, orderBy, where } from 'firebase/firestore'
 import { Mixtape } from '@/lib/types'
 import { MixtapesList } from '@/components/mixtapes/MixtapesList'
 
 async function getMixtapes(): Promise<Mixtape[]> {
   try {
-    const snapshot = await adminDb
-      .collection('mixtapes')
-      .orderBy('created_at', 'desc')
-      .get()
+    const mixtapesRef = collection(db, 'mixtapes')
+    const q = query(mixtapesRef, orderBy('created_at', 'desc'))
+    const snapshot = await getDocs(q)
 
     const allMixtapes = snapshot.docs.map(doc => {
       const data = doc.data()
       return {
         id: doc.id,
         ...data,
-        created_at: data.created_at?.toDate?.().toISOString() || new Date().toISOString()
+        created_at: data.created_at?.toDate?.()?.toISOString() || data.created_at || new Date().toISOString()
       } as Mixtape
     })
 
