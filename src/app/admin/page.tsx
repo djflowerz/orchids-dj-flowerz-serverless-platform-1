@@ -840,7 +840,7 @@ function AdminContent() {
           onSave={async (data, imageFile) => {
             try {
               console.log('🔄 Starting mixtape save...', { isEdit: !!editingItem, hasImage: !!imageFile })
-              let cover_image = data.coverImage || data.cover_image
+              let cover_image = data.coverImage || data.cover_image || ''
 
               if (imageFile) {
                 console.log('📤 Uploading mixtape cover image...')
@@ -890,7 +890,7 @@ function AdminContent() {
           onSave={async (data, imageFile) => {
             try {
               console.log('🔄 Starting track save...', { isEdit: !!editingItem, hasImage: !!imageFile })
-              let cover_image = data.coverImage || data.cover_image
+              let cover_image = data.coverImage || data.cover_image || ''
 
               if (imageFile) {
                 console.log('📤 Uploading track cover image...')
