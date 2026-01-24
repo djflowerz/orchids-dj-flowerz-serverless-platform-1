@@ -12,7 +12,7 @@ import {
   LogOut, Home, Plus, Edit, Trash2, Eye, Download,
   ExternalLink, X, AlertCircle, TrendingUp, ShoppingBag,
   Upload, Play, Shield, Activity, BarChart3, Save, Key, Hash, Check, Truck,
-  ChevronLeft, ChevronRight, ChevronDown, Filter
+  ChevronLeft, ChevronRight, ChevronDown, Filter, Copy, CheckCircle
 } from 'lucide-react'
 import { Product } from '@/lib/types'
 import { toast } from 'sonner'
@@ -48,14 +48,22 @@ interface Mixtape {
   id: string
   title: string
   description: string
-  coverImage: string
-  mixLink: string
+  coverImage?: string
+  cover_image?: string
+  mixLink?: string
+  audio_url?: string
+  video_url?: string
   genre: string
   price: number
   isFree: boolean
   plays: number
   status: 'active' | 'inactive'
   created_at: string
+  audio_download_url?: string
+  video_download_url?: string
+  embed_url?: string
+  is_hot?: boolean
+  is_new_arrival?: boolean
 }
 
 interface MusicPoolTrack {
@@ -148,6 +156,10 @@ interface Plan {
   channels: string[]
   isActive: boolean
   createdAt: string
+  description?: string
+  features?: string[]
+  tier?: string
+  duration?: string
 }
 
 interface SiteSettings {
@@ -161,10 +173,10 @@ interface SiteSettings {
   autoSyncEnabled: boolean
 }
 
-type TabType = 'dashboard' | 'users' | 'products' | 'mixtapes' | 'music-pool' | 'subscriptions' | 'bookings' | 'payments' | 'tips' | 'telegram' | 'reports' | 'settings' | 'shipping'
+type TabType = 'dashboard' | 'users' | 'products' | 'mixtapes' | 'music-pool' | 'subscriptions' | 'bookings' | 'payments' | 'tips' | 'telegram' | 'reports' | 'settings' | 'orders'
 
 
-function UserDetailModal({ user, onClose }: { user: UserData; onClose: () => void }) {
+function UserDetailModal({ user, onClose }: { user: User; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
       <div className="bg-[#12121a] rounded-2xl border border-white/10 w-full max-w-lg">
@@ -235,7 +247,7 @@ function AdminContent() {
     totalTips: 0,
     pendingOrders: 0
   })
-  const [users, setUsers] = useState<UserData[]>([])
+  const [users, setUsers] = useState<User[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [mixtapes, setMixtapes] = useState<Mixtape[]>([])
   const [musicPool, setMusicPool] = useState<MusicPoolTrack[]>([])
@@ -397,7 +409,7 @@ function AdminContent() {
     { id: 'telegram' as TabType, label: 'Telegram', icon: Send },
     { id: 'reports' as TabType, label: 'Reports', icon: FileText },
     { id: 'settings' as TabType, label: 'Settings', icon: Settings },
-    { id: 'shipping' as TabType, label: 'Shipping', icon: Truck },
+    { id: 'orders' as TabType, label: 'Orders', icon: ShoppingBag },
   ]
 
   const formatCurrency = (amount: number) => new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(amount / 100)
@@ -748,8 +760,8 @@ function AdminContent() {
             />
           )}
 
-          {activeTab === 'shipping' && (
-            <ShippingTab
+          {activeTab === 'orders' && (
+            <OrdersTab
               orders={orders}
               formatDate={formatDate}
               formatCurrency={formatCurrency}
@@ -769,37 +781,52 @@ function AdminContent() {
           onClose={() => { setShowProductModal(false); setEditingItem(null) }}
           onSave={async (data, imageFiles) => {
             try {
+              console.log('🔄 Starting product save...', { isEdit: !!editingItem, hasImages: imageFiles?.length > 0 })
               let cover_images = data.cover_images || []
 
               if (imageFiles && imageFiles.length > 0) {
+                console.log('📤 Uploading', imageFiles.length, 'images...')
                 const uploadedUrls = await Promise.all(imageFiles.map(async (file: File) => {
                   const storageRef = ref(storage, `covers/products/${Date.now()}_${file.name}`)
                   await uploadBytes(storageRef, file)
                   return getDownloadURL(storageRef)
                 }))
                 cover_images = [...cover_images, ...uploadedUrls]
+                console.log('✅ Images uploaded successfully')
               }
 
               const saveData = {
                 ...data,
                 cover_images,
-
                 // Ensure defaults
                 downloads: editingItem ? (editingItem as Product).downloads || 0 : 0
               }
 
+              console.log('💾 Saving to Firestore...', { collection: 'products', isEdit: !!editingItem })
               if (editingItem) {
                 await updateDoc(doc(db, 'products', editingItem.id), saveData)
                 setProducts(products.map(p => p.id === editingItem.id ? { ...p, ...saveData } : p))
+                console.log('✅ Product updated successfully')
               } else {
                 const docRef = await addDoc(collection(db, 'products'), { ...saveData, created_at: new Date().toISOString() })
                 setProducts([{ id: docRef.id, ...saveData, created_at: new Date().toISOString() } as Product, ...products])
+                console.log('✅ Product created successfully:', docRef.id)
               }
               setShowProductModal(false)
               setEditingItem(null)
             } catch (error: any) {
-              console.error('Error saving product:', error)
-              alert(`Failed to save product: ${error.message}`)
+              console.error('❌ Error saving product:', error)
+              console.error('Error code:', error.code)
+              console.error('Error details:', error.message)
+
+              // Provide specific error messages
+              if (error.code === 'permission-denied') {
+                throw new Error('Permission denied. Please ensure you are logged in as an admin.')
+              } else if (error.code === 'storage/unauthorized') {
+                throw new Error('Storage upload failed. Check Firebase Storage rules.')
+              } else {
+                throw new Error(error.message || 'Failed to save product. Check console for details.')
+              }
             }
           }}
         />
@@ -808,31 +835,48 @@ function AdminContent() {
       {showMixtapeModal && (
         <MixtapeModal
           mixtape={editingItem as Mixtape | null}
+          channels={siteSettings.telegramChannels || []}
           onClose={() => { setShowMixtapeModal(false); setEditingItem(null) }}
           onSave={async (data, imageFile) => {
             try {
+              console.log('🔄 Starting mixtape save...', { isEdit: !!editingItem, hasImage: !!imageFile })
               let cover_image = data.coverImage || data.cover_image
+
               if (imageFile) {
+                console.log('📤 Uploading mixtape cover image...')
                 const storageRef = ref(storage, `covers/mixtapes/${Date.now()}_${imageFile.name}`)
                 await uploadBytes(storageRef, imageFile)
                 cover_image = await getDownloadURL(storageRef)
+                console.log('✅ Image uploaded successfully')
               }
+
               const saveData = { ...data, cover_image, coverImage: undefined }
               // Remove coverImage field to avoid duplication
               delete saveData.coverImage
 
+              console.log('💾 Saving to Firestore...', { collection: 'mixtapes', isEdit: !!editingItem })
               if (editingItem) {
                 await updateDoc(doc(db, 'mixtapes', editingItem.id), saveData)
                 setMixtapes(mixtapes.map(m => m.id === editingItem.id ? { ...m, ...saveData } : m))
+                console.log('✅ Mixtape updated successfully')
               } else {
                 const docRef = await addDoc(collection(db, 'mixtapes'), { ...saveData, created_at: new Date().toISOString(), plays: 0 })
                 setMixtapes([{ id: docRef.id, ...saveData, plays: 0, created_at: new Date().toISOString() } as Mixtape, ...mixtapes])
+                console.log('✅ Mixtape created successfully:', docRef.id)
               }
               setShowMixtapeModal(false)
               setEditingItem(null)
             } catch (error: any) {
-              console.error('Mixtape save error:', error)
-              throw new Error(error?.message || 'Failed to save mixtape. Check Firebase permissions.')
+              console.error('❌ Mixtape save error:', error)
+              console.error('Error code:', error.code)
+
+              if (error.code === 'permission-denied') {
+                throw new Error('Permission denied. Please ensure you are logged in as an admin.')
+              } else if (error.code === 'storage/unauthorized') {
+                throw new Error('Storage upload failed. Check Firebase Storage rules.')
+              } else {
+                throw new Error(error?.message || 'Failed to save mixtape. Check console for details.')
+              }
             }
           }}
         />
@@ -841,31 +885,48 @@ function AdminContent() {
       {showTrackModal && (
         <TrackModal
           track={editingItem as MusicPoolTrack | null}
+          channels={siteSettings.telegramChannels || []}
           onClose={() => { setShowTrackModal(false); setEditingItem(null) }}
           onSave={async (data, imageFile) => {
             try {
+              console.log('🔄 Starting track save...', { isEdit: !!editingItem, hasImage: !!imageFile })
               let cover_image = data.coverImage || data.cover_image
+
               if (imageFile) {
+                console.log('📤 Uploading track cover image...')
                 const storageRef = ref(storage, `covers/music_pool/${Date.now()}_${imageFile.name}`)
                 await uploadBytes(storageRef, imageFile)
                 cover_image = await getDownloadURL(storageRef)
+                console.log('✅ Image uploaded successfully')
               }
+
               const saveData = { ...data, cover_image, coverImage: undefined }
               // Remove coverImage field to avoid duplication
               delete saveData.coverImage
 
+              console.log('💾 Saving to Firestore...', { collection: 'music_pool', isEdit: !!editingItem })
               if (editingItem) {
                 await updateDoc(doc(db, 'music_pool', editingItem.id), saveData)
                 setMusicPool(musicPool.map(t => t.id === editingItem.id ? { ...t, ...saveData } : t))
+                console.log('✅ Track updated successfully')
               } else {
                 const docRef = await addDoc(collection(db, 'music_pool'), { ...saveData, created_at: new Date().toISOString(), downloads: 0 })
                 setMusicPool([{ id: docRef.id, ...saveData, downloads: 0, created_at: new Date().toISOString() } as MusicPoolTrack, ...musicPool])
+                console.log('✅ Track created successfully:', docRef.id)
               }
               setShowTrackModal(false)
               setEditingItem(null)
             } catch (error: any) {
-              console.error('Track save error:', error)
-              throw new Error(error?.message || 'Failed to save track. Check Firebase permissions.')
+              console.error('❌ Track save error:', error)
+              console.error('Error code:', error.code)
+
+              if (error.code === 'permission-denied') {
+                throw new Error('Permission denied. Please ensure you are logged in as an admin.')
+              } else if (error.code === 'storage/unauthorized') {
+                throw new Error('Storage upload failed. Check Firebase Storage rules.')
+              } else {
+                throw new Error(error?.message || 'Failed to save track. Check console for details.')
+              }
             }
           }}
         />
@@ -1021,8 +1082,8 @@ function DashboardTab({ stats, bookings, transactions, formatCurrency, formatDat
   )
 }
 
-function UsersTab({ users, searchQuery, formatDate, getStatusBadge, onUpdateStatus, onUpdateRole, onViewUser }: any) {
-  const filteredUsers = users.filter((u: UserData) =>
+function UsersTab({ users, searchQuery, formatDate, getStatusBadge, onUpdateStatus, onUpdateRole, onViewUser }: { users: User[]; searchQuery: string; formatDate: (d: string) => string; getStatusBadge: (s: string) => string; onUpdateStatus: (id: string, status: string) => void; onUpdateRole: (id: string, role: string) => void; onViewUser: (u: User) => void }) {
+  const filteredUsers = users.filter((u: User) =>
     u.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     u.email?.toLowerCase().includes(searchQuery.toLowerCase())
   )
@@ -1047,7 +1108,7 @@ function UsersTab({ users, searchQuery, formatDate, getStatusBadge, onUpdateStat
               </tr>
             </thead>
             <tbody>
-              {filteredUsers.map((u: UserData) => (
+              {filteredUsers.map((u: User) => (
                 <tr key={u.id} className="border-b border-white/5 hover:bg-white/5">
                   <td className="p-4">
                     <p className="font-medium">{u.name || 'No name'}</p>
@@ -1100,16 +1161,77 @@ function UsersTab({ users, searchQuery, formatDate, getStatusBadge, onUpdateStat
   )
 }
 
-function ProductsTab({ products, searchQuery, formatCurrency, formatDate, getStatusBadge, onDelete, onAdd, onEdit }: any) {
-  const filteredProducts = products.filter((p: Product) =>
-    p.title?.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+function ProductsTab({ products, searchQuery, formatCurrency, formatDate, getStatusBadge, onDelete, onAdd, onEdit }: { products: Product[]; searchQuery: string; formatCurrency: (n: number) => string; formatDate: (d: string) => string; getStatusBadge: (s: string) => string; onDelete: (id: string) => void; onAdd: () => void; onEdit: (p: Product) => void }) {
+  const [sortBy, setSortBy] = useState<'latest' | 'hot'>('latest')
+  const [categoryFilter, setCategoryFilter] = useState('All')
+
+  const categories = ['All', 'Laptops', 'Desktops', 'Components', 'Accessories', 'Software', 'Samples', 'Apparel']
+
+  const filteredProducts = products.filter((p: Product) => {
+    const matchesSearch = p.title?.toLowerCase().includes(searchQuery.toLowerCase())
+    const matchesCategory = categoryFilter === 'All' || p.category === categoryFilter
+    return matchesSearch && matchesCategory
+  }).sort((a: Product, b: Product) => {
+    if (sortBy === 'hot') {
+      // Assuming 'downloads' or a 'popularity' score exists, otherwise fallback to created_at
+      return (b.downloads || 0) - (a.downloads || 0)
+    }
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  })
+
   // Handle both new and legacy field names
   const digitalProducts = filteredProducts.filter((p: Product) => (p.product_type === 'digital' || (p as any).type === 'digital'))
   const physicalProducts = filteredProducts.filter((p: Product) => (p.product_type === 'physical' || (p as any).type === 'physical'))
 
   return (
     <div className="space-y-6">
+      {/* Quick Categories & Sort Nav */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-4 no-scrollbar mask-gradient-right">
+        <button
+          onClick={() => {
+            setSortBy('latest')
+            setCategoryFilter('All')
+          }}
+          className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-all flex items-center gap-2 ${sortBy === 'latest' && categoryFilter === 'All'
+            ? 'bg-white text-black'
+            : 'bg-white/5 text-white/70 hover:bg-white/10'
+            }`}
+        >
+          <Calendar size={16} />
+          Latest
+        </button>
+        <button
+          onClick={() => {
+            setSortBy('hot')
+            setCategoryFilter('All')
+          }}
+          className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-all flex items-center gap-2 ${sortBy === 'hot' && categoryFilter === 'All'
+            ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-lg shadow-orange-500/20'
+            : 'bg-white/5 text-white/70 hover:bg-white/10'
+            }`}
+        >
+          <div className={`w-2 h-2 rounded-full bg-orange-400 ${sortBy !== 'hot' ? 'animate-pulse' : ''}`} />
+          Hot
+        </button>
+
+        <div className="w-px h-6 bg-white/10 mx-2 shrink-0" />
+
+        {categories.filter(c => c !== 'All').map((c) => (
+          <button
+            key={c}
+            onClick={() => {
+              setCategoryFilter(c)
+            }}
+            className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${categoryFilter === c
+              ? 'bg-violet-500 text-white'
+              : 'bg-white/5 text-white/70 hover:bg-white/10'
+              }`}
+          >
+            {c}
+          </button>
+        ))}
+      </div>
+
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <span className="text-white/50">{filteredProducts.length} products</span>
@@ -1161,6 +1283,7 @@ function ProductsTab({ products, searchQuery, formatCurrency, formatDate, getSta
                   <div>
                     <h3 className="font-semibold truncate pr-2">{product.title}</h3>
                     {product.version && <p className="text-xs text-white/50">v{product.version}</p>}
+                    <p className="text-xs text-white/40">{product.category || 'Uncategorized'}</p>
                   </div>
                   <span className={`px-2 py-0.5 rounded text-xs capitalize ${getStatusBadge(product.status)}`}>{product.status}</span>
                 </div>
@@ -1272,14 +1395,74 @@ function MixtapesTab({ mixtapes, searchQuery, formatCurrency, formatDate, onDele
 }
 
 function MusicPoolTab({ tracks, subscriptions, plans, searchQuery, onDelete, onAdd, onEdit, onAddPlan, onEditPlan, onDeletePlan }: any) {
-  const filteredTracks = tracks.filter((t: MusicPoolTrack) =>
-    t.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    t.artist?.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const [sortBy, setSortBy] = useState<'latest' | 'hot'>('latest')
+  const [genreFilter, setGenreFilter] = useState('All')
+
+  const genres = ['All', 'Afrobeats', 'Amapiano', 'Hip Hop', 'R&B', 'Dancehall', 'Reggae', 'House', 'EDM', 'Pop', 'Gospel', 'Gengetone']
+
+  const filteredTracks = tracks.filter((t: MusicPoolTrack) => {
+    const matchesSearch = t.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      t.artist?.toLowerCase().includes(searchQuery.toLowerCase())
+    const matchesGenre = genreFilter === 'All' || t.genre === genreFilter
+    return matchesSearch && matchesGenre
+  }).sort((a: MusicPoolTrack, b: MusicPoolTrack) => {
+    if (sortBy === 'hot') {
+      return (b.downloads || 0) - (a.downloads || 0)
+    }
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  })
+
   const activeSubscribers = subscriptions.filter((s: Subscription) => s.status === 'active').length
 
   return (
     <div className="space-y-6">
+      {/* Quick Categories & Sort Nav */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-4 no-scrollbar mask-gradient-right">
+        <button
+          onClick={() => {
+            setSortBy('latest')
+            setGenreFilter('All')
+          }}
+          className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-all flex items-center gap-2 ${sortBy === 'latest' && genreFilter === 'All'
+            ? 'bg-white text-black'
+            : 'bg-white/5 text-white/70 hover:bg-white/10'
+            }`}
+        >
+          <Calendar size={16} />
+          Latest
+        </button>
+        <button
+          onClick={() => {
+            setSortBy('hot')
+            setGenreFilter('All')
+          }}
+          className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-all flex items-center gap-2 ${sortBy === 'hot' && genreFilter === 'All'
+            ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-lg shadow-orange-500/20'
+            : 'bg-white/5 text-white/70 hover:bg-white/10'
+            }`}
+        >
+          <div className={`w-2 h-2 rounded-full bg-orange-400 ${sortBy !== 'hot' ? 'animate-pulse' : ''}`} />
+          Hot
+        </button>
+
+        <div className="w-px h-6 bg-white/10 mx-2 shrink-0" />
+
+        {genres.filter(g => g !== 'All').map((g) => (
+          <button
+            key={g}
+            onClick={() => {
+              setGenreFilter(g)
+            }}
+            className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${genreFilter === g
+              ? 'bg-fuchsia-500 text-white'
+              : 'bg-white/5 text-white/70 hover:bg-white/10'
+              }`}
+          >
+            {g}
+          </button>
+        ))}
+      </div>
+
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <span className="text-white/50">{filteredTracks.length} tracks</span>
@@ -1337,22 +1520,22 @@ function MusicPoolTab({ tracks, subscriptions, plans, searchQuery, onDelete, onA
               <div className="flex justify-between items-start mb-4">
                 <div>
                   <h4 className="font-bold text-lg text-white capitalize">{plan.name}</h4>
-                  <p className="text-white/50 text-sm capitalize">{plan.duration}ly Billing</p>
+                  <p className="text-white/50 text-sm capitalize">{plan.durationDays === 365 ? 'Year' : (plan.durationDays === 30 ? 'Month' : `${plan.durationDays} Days`)}ly Billing</p>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => onEditPlan(plan)} className="p-2 rounded-lg hover:bg-white/10 text-white/70"><Edit2 size={16} /></button>
+                  <button onClick={() => onEditPlan(plan)} className="p-2 rounded-lg hover:bg-white/10 text-white/70"><Edit size={16} /></button>
                   <button onClick={() => onDeletePlan(plan.id)} className="p-2 rounded-lg hover:bg-white/10 text-red-400"><Trash2 size={16} /></button>
                 </div>
               </div>
               <div className="text-3xl font-bold text-white mb-6">
-                {formatCurrency(plan.price)}
-                <span className="text-sm text-white/40 font-normal">/{plan.duration === 'month' ? 'mo' : 'yr'}</span>
+                {new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(plan.price)}
+                <span className="text-sm text-white/40 font-normal">/{plan.durationDays}d</span>
               </div>
               <div className="space-y-2">
-                {plan.features?.map((f, i) => (
+                {plan.channels?.map((c, i) => (
                   <div key={i} className="flex items-center gap-2 text-sm text-white/70">
                     <div className="w-1.5 h-1.5 rounded-full bg-violet-500" />
-                    {f}
+                    Channel {c}
                   </div>
                 ))}
               </div>
@@ -1427,7 +1610,7 @@ function MusicPoolTab({ tracks, subscriptions, plans, searchQuery, onDelete, onA
   )
 }
 
-function SubscriptionsTab({ subscriptions, searchQuery, formatDate, getStatusBadge }: any) {
+function SubscriptionsTab({ subscriptions, searchQuery, formatDate, getStatusBadge }: { subscriptions: Subscription[]; searchQuery: string; formatDate: (d: string) => string; getStatusBadge: (s: string) => string }) {
   const filteredSubs = subscriptions.filter((s: Subscription) =>
     s.user_email?.toLowerCase().includes(searchQuery.toLowerCase())
   )
@@ -1506,7 +1689,7 @@ function SubscriptionsTab({ subscriptions, searchQuery, formatDate, getStatusBad
   )
 }
 
-function BookingsTab({ bookings, searchQuery, formatCurrency, formatDate, getStatusBadge, onUpdateStatus }: any) {
+function BookingsTab({ bookings, searchQuery, formatCurrency, formatDate, getStatusBadge, onUpdateStatus }: { bookings: Booking[]; searchQuery: string; formatCurrency: (n: number) => string; formatDate: (d: string) => string; getStatusBadge: (s: string) => string; onUpdateStatus: (id: string, status: string) => void }) {
   const filteredBookings = bookings.filter((b: Booking) =>
     b.customer_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     b.email?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -1570,15 +1753,94 @@ function BookingsTab({ bookings, searchQuery, formatCurrency, formatDate, getSta
   )
 }
 
-function PaymentsTab({ transactions, stats, searchQuery, formatCurrency, formatDate, getStatusBadge }: any) {
+
+function TransactionDetailModal({ transaction, onClose, formatCurrency, formatDate }: { transaction: Transaction; onClose: () => void; formatCurrency: (n: number) => string; formatDate: (d: string) => string }) {
+  const [copied, setCopied] = useState('');
+
+  const handleCopy = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(label);
+    setTimeout(() => setCopied(''), 2000);
+  }
+
+  const DataField = ({ label, value, copyable = false }: { label: string; value: any; copyable?: boolean }) => (
+    <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+      <p className="text-white/50 text-xs mb-1 uppercase tracking-wider">{label}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-mono text-sm break-all">{value || 'N/A'}</p>
+        {copyable && value && (
+          <button
+            onClick={() => handleCopy(String(value), label)}
+            className="text-white/30 hover:text-white transition-colors"
+          >
+            {copied === label ? <CheckCircle size={14} className="text-emerald-500" /> : <Copy size={14} />}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <div className="bg-[#12121a] rounded-2xl border border-white/10 w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b border-white/10 flex items-center justify-between">
+          <h3 className="text-lg font-semibold">Transaction Details</h3>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/10"><X size={18} /></button>
+        </div>
+
+        <div className="p-6 space-y-4">
+
+          <div className="flex items-center justify-between bg-white/5 p-4 rounded-xl border border-white/10 mb-4">
+            <div>
+              <p className="text-white/50 text-sm">Amount</p>
+              <p className="text-2xl font-bold text-white">{formatCurrency(transaction.amount)}</p>
+            </div>
+            <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${transaction.status === 'success' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
+              transaction.status === 'pending' ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
+                'bg-red-500/20 text-red-400 border-red-500/30'
+              }`}>
+              {transaction.status}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3">
+            <DataField label="Transaction ID" value={transaction.id} copyable />
+            <DataField label="Reference" value={transaction.reference} copyable />
+            <DataField label="Paystack Ref" value={(transaction as any).paystack_reference} copyable />
+            <DataField label="User Email" value={transaction.user_email} copyable />
+            <DataField label="User ID" value={transaction.user_id} copyable />
+            <DataField label="Type" value={transaction.type} />
+            <DataField label="Method" value={transaction.payment_method} />
+            <DataField label="Date" value={formatDate(transaction.created_at)} />
+          </div>
+
+          {/* Raw Data Toggle or View */}
+          <div className="mt-6 pt-4 border-t border-white/10">
+            <details className="text-xs text-white/50">
+              <summary className="cursor-pointer hover:text-white transition-colors">View Raw JSON</summary>
+              <pre className="mt-2 p-3 bg-black/30 rounded-lg overflow-x-auto whitespace-pre-wrap">
+                {JSON.stringify(transaction, null, 2)}
+              </pre>
+            </details>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PaymentsTab({ transactions, stats, searchQuery, formatCurrency, formatDate, getStatusBadge }: { transactions: Transaction[]; stats: { totalRevenue: number; pendingOrders: number }; searchQuery: string; formatCurrency: (n: number) => string; formatDate: (d: string) => string; getStatusBadge: (s: string) => string }) {
   const [filterType, setFilterType] = useState('all')
   const [filterStatus, setFilterStatus] = useState('all')
   const [page, setPage] = useState(1)
+  const [selectedTx, setSelectedTx] = useState<Transaction | null>(null)
   const itemsPerPage = 20
 
   const filteredTx = transactions.filter((t: Transaction) => {
     const matchesSearch = t.user_email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.reference?.toLowerCase().includes(searchQuery.toLowerCase())
+      t.reference?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (t as any).paystack_reference?.toLowerCase().includes(searchQuery.toLowerCase())
     const matchesType = filterType === 'all' || t.type === filterType
     const matchesStatus = filterStatus === 'all' || t.status === filterStatus
     return matchesSearch && matchesType && matchesStatus
@@ -1592,7 +1854,7 @@ function PaymentsTab({ transactions, stats, searchQuery, formatCurrency, formatD
     const csvContent = [
       headers.join(','),
       ...filteredTx.map((tx: Transaction) => [
-        tx.reference || '',
+        tx.reference || (tx as any).paystack_reference || '',
         tx.user_email || '',
         tx.type || '',
         tx.payment_method || '',
@@ -1680,12 +1942,15 @@ function PaymentsTab({ transactions, stats, searchQuery, formatCurrency, formatD
                 <th className="text-left p-4 text-white/50 font-medium text-sm">Amount</th>
                 <th className="text-left p-4 text-white/50 font-medium text-sm">Status</th>
                 <th className="text-left p-4 text-white/50 font-medium text-sm">Date</th>
+                <th className="text-left p-4 text-white/50 font-medium text-sm">Action</th>
               </tr>
             </thead>
             <tbody>
               {paginatedTx.map((tx: Transaction) => (
                 <tr key={tx.id} className="border-b border-white/5 hover:bg-white/5">
-                  <td className="p-4 font-mono text-sm">{tx.reference?.slice(0, 12)}...</td>
+                  <td className="p-4 font-mono text-sm max-w-[150px] truncate" title={tx.reference}>
+                    {tx.reference || (tx as any).paystack_reference || 'N/A'}
+                  </td>
                   <td className="p-4 text-white/70">{tx.user_email}</td>
                   <td className="p-4 capitalize">{tx.type}</td>
                   <td className="p-4 text-white/70">{tx.payment_method || 'N/A'}</td>
@@ -1696,8 +1961,23 @@ function PaymentsTab({ transactions, stats, searchQuery, formatCurrency, formatD
                     </span>
                   </td>
                   <td className="p-4 text-white/70 text-sm">{formatDate(tx.created_at)}</td>
+                  <td className="p-4">
+                    <button
+                      onClick={() => setSelectedTx(tx)}
+                      className="p-2 rounded-lg hover:bg-white/10 text-white/50 hover:text-white"
+                    >
+                      <Eye size={16} />
+                    </button>
+                  </td>
                 </tr>
               ))}
+              {paginatedTx.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="p-8 text-center text-white/50">
+                    No transactions found
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -1724,11 +2004,20 @@ function PaymentsTab({ transactions, stats, searchQuery, formatCurrency, formatD
           </div>
         )}
       </div>
+
+      {selectedTx && (
+        <TransactionDetailModal
+          transaction={selectedTx}
+          onClose={() => setSelectedTx(null)}
+          formatCurrency={formatCurrency}
+          formatDate={formatDate}
+        />
+      )}
     </div>
   )
 }
 
-function TipsTab({ tips, searchQuery, formatCurrency, formatDate }: any) {
+function TipsTab({ tips, searchQuery, formatCurrency, formatDate }: { tips: Tip[]; searchQuery: string; formatCurrency: (n: number) => string; formatDate: (d: string) => string }) {
   const [filterSource, setFilterSource] = useState('all')
   const [page, setPage] = useState(1)
   const itemsPerPage = 20
@@ -1873,12 +2162,12 @@ function TipsTab({ tips, searchQuery, formatCurrency, formatDate }: any) {
   )
 }
 
-function TelegramTab({ subscriptions, users, settings, onConfigureToken, onManageChannels, onToggleAutoSync }: any) {
+function TelegramTab({ subscriptions, users, settings, onConfigureToken, onManageChannels, onToggleAutoSync }: { subscriptions: Subscription[]; users: User[]; settings: SiteSettings; onConfigureToken: () => void; onManageChannels: () => void; onToggleAutoSync: () => void }) {
   const [userSearch, setUserSearch] = useState('')
   const activeSubscribers = subscriptions.filter((s: Subscription) => s.status === 'active')
-  const connectedUsers = users.filter((u: UserData) => u.telegram_user_id || u.telegram_username)
+  const connectedUsers = users.filter((u: User) => u.telegram_user_id || u.telegram_username)
 
-  const filteredUsers = connectedUsers.filter((u: UserData) =>
+  const filteredUsers = connectedUsers.filter((u: User) =>
     u.email?.toLowerCase().includes(userSearch.toLowerCase()) ||
     u.telegram_username?.toLowerCase().includes(userSearch.toLowerCase())
   )
@@ -1980,7 +2269,7 @@ function TelegramTab({ subscriptions, users, settings, onConfigureToken, onManag
                     <td colSpan={3} className="p-8 text-center text-white/40">No connected users found</td>
                   </tr>
                 ) : (
-                  filteredUsers.slice(0, 5).map((u: UserData) => (
+                  filteredUsers.slice(0, 5).map((u: User) => (
                     <tr key={u.id} className="border-b border-white/5">
                       <td className="p-3">
                         <div className="font-medium">{u.name || 'User'}</div>
@@ -2021,7 +2310,7 @@ function TelegramTab({ subscriptions, users, settings, onConfigureToken, onManag
   )
 }
 
-function ReportsTab({ users, transactions, bookings }: any) {
+function ReportsTab({ users, transactions, bookings }: { users: User[]; transactions: Transaction[]; bookings: Booking[] }) {
   return (
     <div className="space-y-6">
       <h3 className="text-lg font-semibold">Reports & Analytics</h3>
@@ -2067,32 +2356,145 @@ function ReportsTab({ users, transactions, bookings }: any) {
   )
 }
 
-function ShippingTab({ orders, formatDate, formatCurrency, getStatusBadge }: any) {
+
+function OrderDetailModal({ order, onClose, formatCurrency, formatDate }: { order: any; onClose: () => void; formatCurrency: (n: number) => string; formatDate: (d: string) => string }) {
+  const [copied, setCopied] = useState('');
+
+  const handleCopy = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(label);
+    setTimeout(() => setCopied(''), 2000);
+  }
+
+  const DataField = ({ label, value, copyable = false }: { label: string; value: any; copyable?: boolean }) => (
+    <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+      <p className="text-white/50 text-xs mb-1 uppercase tracking-wider">{label}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-mono text-sm break-all">{value || 'N/A'}</p>
+        {copyable && value && (
+          <button
+            onClick={() => handleCopy(String(value), label)}
+            className="text-white/30 hover:text-white transition-colors"
+          >
+            {copied === label ? <CheckCircle size={14} className="text-emerald-500" /> : <Copy size={14} />}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <div className="bg-[#12121a] rounded-2xl border border-white/10 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b border-white/10 flex items-center justify-between">
+          <h3 className="text-lg font-semibold">Order Details</h3>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/10"><X size={18} /></button>
+        </div>
+
+        <div className="p-6 space-y-6">
+          {/* Status Bar */}
+          <div className="flex items-center justify-between bg-white/5 p-4 rounded-xl border border-white/10">
+            <div>
+              <p className="text-white/50 text-sm">Total Amount</p>
+              <p className="text-2xl font-bold text-white">{formatCurrency(order.total || order.amount || 0)}</p>
+            </div>
+            <div className="text-right">
+              <div className={`inline-block px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider mb-1 border ${order.status === 'paid' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
+                order.status === 'pending' ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
+                  'bg-red-500/20 text-red-400 border-red-500/30'
+                }`}>
+                {order.status}
+              </div>
+              <p className="text-xs text-white/50">{formatDate(order.created_at)}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <DataField label="Order ID / Ref" value={order.id} copyable />
+            <DataField label="User Email" value={order.user_email} copyable />
+            {order.shipping_details?.fullName && <DataField label="Customer Name" value={order.shipping_details.fullName} />}
+            {order.shipping_details?.phone && <DataField label="Phone" value={order.shipping_details.phone} copyable />}
+          </div>
+
+          {/* Items */}
+          <div>
+            <h4 className="text-sm font-semibold mb-3 text-white/70">Items</h4>
+            <div className="bg-white/5 rounded-xl border border-white/10 overflow-hidden">
+              {order.items?.map((item: any, i: number) => (
+                <div key={i} className="p-3 border-b border-white/5 last:border-0 flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <span className="text-white/30 text-xs w-6 text-center">{item.quantity}x</span>
+                    <span className="text-sm">{item.title || item.name}</span>
+                  </div>
+                  <span className="text-sm font-medium">{formatCurrency(item.amount || item.price * item.quantity)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Shipping Info */}
+          {order.shipping_details && (
+            <div>
+              <h4 className="text-sm font-semibold mb-3 text-white/70">Shipping Details</h4>
+              <div className="bg-white/5 p-4 rounded-xl border border-white/10 space-y-2 text-sm text-white/80">
+                <p>{order.shipping_details.address}</p>
+                <p>{order.shipping_details.city}, {order.shipping_details.country}</p>
+                {order.shipping_details.notes && (
+                  <div className="mt-2 pt-2 border-t border-white/10 text-white/50 italic">
+                    Disclaimer/Notes: {order.shipping_details.notes}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Raw Data */}
+          <div className="pt-4 border-t border-white/10">
+            <details className="text-xs text-white/50">
+              <summary className="cursor-pointer hover:text-white transition-colors">View Raw JSON</summary>
+              <pre className="mt-2 p-3 bg-black/30 rounded-lg overflow-x-auto whitespace-pre-wrap">
+                {JSON.stringify(order, null, 2)}
+              </pre>
+            </details>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function OrdersTab({ orders, formatDate, formatCurrency, getStatusBadge }: { orders: Order[]; formatDate: (d: string) => string; formatCurrency: (n: number) => string; getStatusBadge: (s: string) => string }) {
   const [filterStatus, setFilterStatus] = useState('all')
+  const [filterType, setFilterType] = useState('all')
   const [page, setPage] = useState(1)
   const itemsPerPage = 20
   const [updatingOrder, setUpdatingOrder] = useState<string | null>(null)
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
 
-  // Filter for orders that require shipping (physical products)
-  const shippingOrders = orders.filter((o: any) => o.shipping_address || (o.items && o.items.some((i: any) => i.type === 'physical')))
+  const filteredOrders = orders.filter((o: any) => {
+    // Filter Type
+    const isPhysical = o.items?.some((i: any) => i.type === 'physical') || o.shipping_address
+    const isDigital = !isPhysical
 
-  const metrics = {
-    pending: shippingOrders.filter((o: any) => o.shipping_status === 'pending' || !o.shipping_status).length,
-    in_transit: shippingOrders.filter((o: any) => o.shipping_status === 'shipped').length,
-    delivered: shippingOrders.filter((o: any) => o.shipping_status === 'delivered').length,
-    failed: shippingOrders.filter((o: any) => o.shipping_status === 'failed' || o.shipping_status === 'returned').length
-  }
+    if (filterType === 'physical' && !isPhysical) return false
+    if (filterType === 'digital' && !isDigital) return false
 
-  const filteredOrders = shippingOrders.filter((o: any) => {
+    // Filter Status
     if (filterStatus === 'all') return true
-    const status = o.shipping_status || 'pending'
-    return status === filterStatus
+
+    // Check both payment status and shipping status
+    if (filterStatus === 'pending') return o.status === 'pending'
+    if (filterStatus === 'paid') return o.status === 'paid'
+    if (filterStatus === 'shipped') return o.shipping_status === 'shipped'
+    if (filterStatus === 'delivered') return o.shipping_status === 'delivered'
+
+    return o.status === filterStatus
   })
 
   const totalPages = Math.ceil(filteredOrders.length / itemsPerPage)
   const paginatedOrders = filteredOrders.slice((page - 1) * itemsPerPage, page * itemsPerPage)
 
-  const handleUpdateStatus = async (orderId: string, newStatus: string) => {
+  const handleUpdateShippingStatus = async (orderId: string, newStatus: string) => {
     setUpdatingOrder(orderId)
     try {
       await updateDoc(doc(db, 'orders', orderId), {
@@ -2100,6 +2502,22 @@ function ShippingTab({ orders, formatDate, formatCurrency, getStatusBadge }: any
         updated_at: new Date().toISOString()
       })
       toast.success(`Order marked as ${newStatus}`)
+    } catch (error) {
+      console.error('Error updating status:', error)
+      toast.error('Failed to update status')
+    } finally {
+      setUpdatingOrder(null)
+    }
+  }
+
+  const handleUpdatePaymentStatus = async (orderId: string, newStatus: string) => {
+    setUpdatingOrder(orderId)
+    try {
+      await updateDoc(doc(db, 'orders', orderId), {
+        status: newStatus,
+        updated_at: new Date().toISOString()
+      })
+      toast.success(`Payment marked as ${newStatus}`)
     } catch (error) {
       console.error('Error updating status:', error)
       toast.error('Failed to update status')
@@ -2125,61 +2543,65 @@ function ShippingTab({ orders, formatDate, formatCurrency, getStatusBadge }: any
       {/* Metrics Dashboard */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div
+          className={`bg-white/5 rounded-xl border border-white/10 p-5`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <ShoppingBag className="text-white/70" size={20} />
+            <span className="text-xs font-medium text-white/50 uppercase">Total Orders</span>
+          </div>
+          <p className="text-2xl font-bold text-white">{orders.length}</p>
+        </div>
+
+        <div
+          onClick={() => setFilterStatus('paid')}
+          className={`cursor-pointer bg-emerald-500/10 rounded-xl border p-5 transition-all ${filterStatus === 'paid' ? 'border-emerald-500 ring-1 ring-emerald-500' : 'border-emerald-500/20 hover:bg-emerald-500/20'}`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <Check className="text-emerald-400" size={20} />
+            <span className="text-xs font-medium text-emerald-400/70 uppercase">Paid / Completed</span>
+          </div>
+          <p className="text-2xl font-bold text-white">{orders.filter((o: any) => o.status === 'paid' || o.status === 'completed').length}</p>
+        </div>
+
+        <div
           onClick={() => setFilterStatus('pending')}
           className={`cursor-pointer bg-amber-500/10 rounded-xl border p-5 transition-all ${filterStatus === 'pending' ? 'border-amber-500 ring-1 ring-amber-500' : 'border-amber-500/20 hover:bg-amber-500/20'}`}
         >
           <div className="flex items-center justify-between mb-2">
-            <Package className="text-amber-400" size={20} />
-            <span className="text-xs font-medium text-amber-400/70 uppercase">Pending</span>
+            <Activity className="text-amber-400" size={20} />
+            <span className="text-xs font-medium text-amber-400/70 uppercase">Pending Payment</span>
           </div>
-          <p className="text-2xl font-bold text-white">{metrics.pending}</p>
-          <p className="text-xs text-white/40 mt-1">To be packed</p>
+          <p className="text-2xl font-bold text-white">{orders.filter((o: any) => o.status === 'pending').length}</p>
         </div>
 
         <div
-          onClick={() => setFilterStatus('shipped')}
-          className={`cursor-pointer bg-blue-500/10 rounded-xl border p-5 transition-all ${filterStatus === 'shipped' ? 'border-blue-500 ring-1 ring-blue-500' : 'border-blue-500/20 hover:bg-blue-500/20'}`}
+          onClick={() => { setFilterType('physical'); setFilterStatus('all'); }}
+          className={`cursor-pointer bg-blue-500/10 rounded-xl border p-5 transition-all ${filterType === 'physical' ? 'border-blue-500 ring-1 ring-blue-500' : 'border-blue-500/20 hover:bg-blue-500/20'}`}
         >
           <div className="flex items-center justify-between mb-2">
             <Truck className="text-blue-400" size={20} />
-            <span className="text-xs font-medium text-blue-400/70 uppercase">In Transit</span>
+            <span className="text-xs font-medium text-blue-400/70 uppercase">Physical orders</span>
           </div>
-          <p className="text-2xl font-bold text-white">{metrics.in_transit}</p>
-          <p className="text-xs text-white/40 mt-1">On the way</p>
-        </div>
-
-        <div
-          onClick={() => setFilterStatus('delivered')}
-          className={`cursor-pointer bg-emerald-500/10 rounded-xl border p-5 transition-all ${filterStatus === 'delivered' ? 'border-emerald-500 ring-1 ring-emerald-500' : 'border-emerald-500/20 hover:bg-emerald-500/20'}`}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <Check className="text-emerald-400" size={20} />
-            <span className="text-xs font-medium text-emerald-400/70 uppercase">Delivered</span>
-          </div>
-          <p className="text-2xl font-bold text-white">{metrics.delivered}</p>
-          <p className="text-xs text-white/40 mt-1">Completed</p>
-        </div>
-
-        <div
-          onClick={() => setFilterStatus('failed')}
-          className={`cursor-pointer bg-red-500/10 rounded-xl border p-5 transition-all ${filterStatus === 'failed' ? 'border-red-500 ring-1 ring-red-500' : 'border-red-500/20 hover:bg-red-500/20'}`}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <AlertCircle className="text-red-400" size={20} />
-            <span className="text-xs font-medium text-red-400/70 uppercase">Failed</span>
-          </div>
-          <p className="text-2xl font-bold text-white">{metrics.failed}</p>
-          <p className="text-xs text-white/40 mt-1">Returns / Issues</p>
+          <p className="text-2xl font-bold text-white">{orders.filter((o: any) => o.items?.some((i: any) => i.type === 'physical') || o.shipping_address).length}</p>
         </div>
       </div>
 
       {/* Orders Table */}
       <div className="bg-white/5 rounded-2xl border border-white/10 overflow-hidden">
-        <div className="p-4 border-b border-white/10 flex items-center justify-between">
-          <h3 className="font-semibold">Shipping Orders</h3>
+        <div className="p-4 border-b border-white/10 flex items-center justify-between gap-4">
+          <h3 className="font-semibold">All Orders</h3>
           <div className="flex gap-2">
+            <select
+              value={filterType}
+              onChange={(e) => { setFilterType(e.target.value); setPage(1) }}
+              className="bg-zinc-900 border border-white/10 rounded px-3 py-1.5 text-xs focus:outline-none focus:border-white/30"
+            >
+              <option value="all">All Types</option>
+              <option value="digital">Digital Only</option>
+              <option value="physical">Physical</option>
+            </select>
             {filterStatus !== 'all' && (
-              <button onClick={() => setFilterStatus('all')} className="text-xs text-white/50 hover:text-white">Clear Filter</button>
+              <button onClick={() => setFilterStatus('all')} className="text-xs text-white/50 hover:text-white px-2">Clear Status Filter</button>
             )}
           </div>
         </div>
@@ -2187,75 +2609,105 @@ function ShippingTab({ orders, formatDate, formatCurrency, getStatusBadge }: any
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-white/10 bg-white/5">
-                <th className="text-left p-4 font-medium text-white/50">Order ID</th>
-                <th className="text-left p-4 font-medium text-white/50">Customer</th>
-                <th className="text-left p-4 font-medium text-white/50">Location</th>
+                <th className="text-left p-4 font-medium text-white/50">Reference/ID</th>
                 <th className="text-left p-4 font-medium text-white/50">Details</th>
-                <th className="text-left p-4 font-medium text-white/50">Status</th>
-                <th className="text-left p-4 font-medium text-white/50">Courier</th>
-                <th className="text-left p-4 font-medium text-white/50">Actions</th>
+                <th className="text-left p-4 font-medium text-white/50">Items</th>
+                <th className="text-left p-4 font-medium text-white/50">Amount</th>
+                <th className="text-left p-4 font-medium text-white/50">Payment</th>
+                <th className="text-left p-4 font-medium text-white/50">Fulfillment</th>
+                <th className="text-left p-4 font-medium text-white/50">Action</th>
               </tr>
             </thead>
             <tbody>
               {paginatedOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-white/40">No orders found</td>
+                  <td colSpan={6} className="p-8 text-center text-white/40">No orders found</td>
                 </tr>
               ) : (
-                paginatedOrders.map((order: any) => (
-                  <tr key={order.id} className="border-b border-white/5 hover:bg-white/5">
-                    <td className="p-4 font-mono text-xs">{order.id.slice(0, 8)}</td>
-                    <td className="p-4">
-                      <div className="font-medium">{order.user_email?.split('@')[0]}</div>
-                      <div className="text-xs text-white/50">{order.user_email}</div>
-                    </td>
-                    <td className="p-4 max-w-[150px] truncate" title={order.shipping_address}>
-                      {order.shipping_address || 'N/A'}
-                    </td>
-                    <td className="p-4">
-                      <p className="text-xs text-white/70">{order.items?.length || 0} items</p>
-                      <p className="font-medium text-cyan-400">{formatCurrency(order.total || 0)}</p>
-                    </td>
-                    <td className="p-4 py-2">
-                      <span className={`px-2 py-1 rounded text-xs border capitalize
-                        ${(!order.shipping_status || order.shipping_status === 'pending') ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
-                          order.shipping_status === 'shipped' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                            order.shipping_status === 'delivered' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                              'bg-red-500/10 text-red-400 border-red-500/20'
-                        }`}>
-                        {order.shipping_status || 'pending'}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <select
-                        className="bg-transparent border border-white/10 rounded px-2 py-1 text-xs focus:outline-none focus:border-white/30"
-                        value={order.courier_name || ''}
-                        onChange={(e) => handleUpdateCourier(order.id, e.target.value)}
-                      >
-                        <option value="" className="bg-zinc-900">Assign Courier</option>
-                        <option value="G4S" className="bg-zinc-900">G4S</option>
-                        <option value="Wells Fargo" className="bg-zinc-900">Wells Fargo</option>
-                        <option value="Fargo Courier" className="bg-zinc-900">Fargo Courier</option>
-                        <option value="Sendy" className="bg-zinc-900">Sendy</option>
-                        <option value="Pickup" className="bg-zinc-900">Pickup</option>
-                      </select>
-                    </td>
-                    <td className="p-4">
-                      <select
-                        className="bg-white/5 border border-white/10 rounded px-2 py-1 text-xs focus:outline-none hover:bg-white/10"
-                        value={order.shipping_status || 'pending'}
-                        onChange={(e) => handleUpdateStatus(order.id, e.target.value)}
-                        disabled={updatingOrder === order.id}
-                      >
-                        <option value="pending" className="bg-zinc-900">Pending</option>
-                        <option value="packed" className="bg-zinc-900">Packed</option>
-                        <option value="shipped" className="bg-zinc-900">Shipped</option>
-                        <option value="delivered" className="bg-zinc-900">Delivered</option>
-                        <option value="failed" className="bg-zinc-900">Failed</option>
-                      </select>
-                    </td>
-                  </tr>
-                ))
+                paginatedOrders.map((order: any) => {
+                  const isPhysical = order.items?.some((i: any) => i.type === 'physical') || order.shipping_address
+                  const itemCount = order.items?.length || 0
+
+                  return (
+                    <tr key={order.id} className="border-b border-white/5 hover:bg-white/5">
+                      <td className="p-4">
+                        <div className="font-mono text-xs text-white/70">{order.id.slice(0, 12)}...</div>
+                        <div className="text-[10px] text-white/40 mt-1">{new Date(order.created_at).toLocaleString()}</div>
+                      </td>
+                      <td className="p-4">
+                        <div className="font-medium">{order.user_email?.split('@')[0] || 'Guest'}</div>
+                        <div className="text-xs text-white/50">{order.user_email}</div>
+                        {isPhysical && (
+                          <div className="text-[10px] text-blue-300 mt-1 flex items-center gap-1"><Truck size={10} /> Physical Order</div>
+                        )}
+                      </td>
+                      <td className="p-4 max-w-[250px]">
+                        <div className="text-xs space-y-1">
+                          {order.items?.slice(0, 3).map((item: any, i: number) => (
+                            <div key={i} className="truncate text-white/80">• {item.title || item.name} {item.quantity > 1 ? `(x${item.quantity})` : ''}</div>
+                          ))}
+                          {itemCount > 3 && <div className="text-white/40 italic">+{itemCount - 3} more</div>}
+                        </div>
+                      </td>
+                      <td className="p-4 font-medium text-emerald-400">{formatCurrency(order.total || order.amount || 0)}</td>
+                      <td className="p-4">
+                        <select
+                          className={`px-2 py-1 rounded text-xs border capitalize bg-transparent focus:outline-none cursor-pointer
+                          ${order.status === 'paid' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                              order.status === 'pending' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                                'bg-red-500/10 text-red-400 border-red-500/20'
+                            }`}
+                          value={order.status || 'pending'}
+                          onChange={(e) => handleUpdatePaymentStatus(order.id, e.target.value)}
+                          disabled={updatingOrder === order.id}
+                        >
+                          <option value="pending" className="bg-zinc-900">Pending</option>
+                          <option value="paid" className="bg-zinc-900">Paid</option>
+                          <option value="failed" className="bg-zinc-900">Failed</option>
+                        </select>
+                      </td>
+                      <td className="p-4">
+                        {isPhysical ? (
+                          <div className="flex flex-col gap-2">
+                            <select
+                              className="bg-white/5 border border-white/10 rounded px-2 py-1 text-xs focus:outline-none hover:bg-white/10"
+                              value={order.shipping_status || 'pending'}
+                              onChange={(e) => handleUpdateShippingStatus(order.id, e.target.value)}
+                              disabled={updatingOrder === order.id}
+                            >
+                              <option value="pending" className="bg-zinc-900">Pending</option>
+                              <option value="packed" className="bg-zinc-900">Packed</option>
+                              <option value="shipped" className="bg-zinc-900">Shipped</option>
+                              <option value="delivered" className="bg-zinc-900">Delivered</option>
+                            </select>
+                            <select
+                              className="bg-transparent border-0 px-0 py-0 text-[10px] text-white/50 focus:outline-none focus:text-white"
+                              value={order.courier_name || ''}
+                              onChange={(e) => handleUpdateCourier(order.id, e.target.value)}
+                            >
+                              <option value="" className="bg-zinc-900">No Courier</option>
+                              <option value="G4S" className="bg-zinc-900">G4S</option>
+                              <option value="Wells Fargo" className="bg-zinc-900">Wells Fargo</option>
+                              <option value="Fargo Courier" className="bg-zinc-900">Fargo</option>
+                              <option value="Sendy" className="bg-zinc-900">Sendy</option>
+                              <option value="Pickup" className="bg-zinc-900">Pickup</option>
+                            </select>
+                          </div>
+                        ) : (
+                          <span className="text-white/30 text-xs italic">Digital Delivery</span>
+                        )}
+                      </td>
+                      <td className="p-4">
+                        <button
+                          onClick={() => setSelectedOrder(order)}
+                          className="p-2 rounded-lg hover:bg-white/10 text-white/50 hover:text-white"
+                        >
+                          <Eye size={16} />
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })
               )}
             </tbody>
           </table>
@@ -2283,11 +2735,20 @@ function ShippingTab({ orders, formatDate, formatCurrency, getStatusBadge }: any
           </div>
         )}
       </div>
+
+      {selectedOrder && (
+        <OrderDetailModal
+          order={selectedOrder}
+          onClose={() => setSelectedOrder(null)}
+          formatCurrency={formatCurrency}
+          formatDate={formatDate}
+        />
+      )}
     </div>
   )
 }
 
-function SettingsTab({ settings, onToggleMaintenance, onConfigurePaystack, onConfigureMpesa, onEditEmailTemplate }: any) {
+function SettingsTab({ settings, onToggleMaintenance, onConfigurePaystack, onConfigureMpesa, onEditEmailTemplate }: { settings: SiteSettings; onToggleMaintenance: () => void; onConfigurePaystack: () => void; onConfigureMpesa: () => void; onEditEmailTemplate: (t: string) => void }) {
   return (
     <div className="space-y-6">
       <h3 className="text-lg font-semibold">System Settings</h3>
@@ -2392,6 +2853,11 @@ function ProductModal({ product, onClose, onSave }: { product: Product | null; o
     estimated_delivery_time: product?.estimated_delivery_time || '',
     weight: product?.weight || 0,
     dimensions: product?.dimensions || '',
+
+    // Marketing
+    is_hot: (product as any)?.is_hot || false,
+    is_new_arrival: (product as any)?.is_new_arrival || false,
+    is_trending: (product as any)?.is_trending || false,
   })
 
   const [imageFiles, setImageFiles] = useState<File[]>([])
@@ -2537,6 +3003,55 @@ function ProductModal({ product, onClose, onSave }: { product: Product | null; o
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                 className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50"
               />
+            </div>
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Category</label>
+              <select
+                value={formData.category}
+                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50"
+              >
+                <option value="">Select Category</option>
+                {['Laptops', 'Desktops', 'Components', 'Accessories', 'Software', 'Samples', 'Apparel'].map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+                <option value="Other">Other</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Marketing Tags</label>
+              <div className="flex flex-wrap gap-4 bg-white/5 p-3 rounded-xl border border-white/10">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={(formData as any).is_hot}
+                    onChange={(e) => setFormData({ ...formData, is_hot: e.target.checked } as any)}
+                    className="rounded bg-white/10 border-white/20 text-orange-500 focus:ring-orange-500"
+                  />
+                  <span className="text-sm flex items-center gap-1 text-white/80"><TrendingUp size={14} className="text-orange-500" /> Hot</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={(formData as any).is_new_arrival}
+                    onChange={(e) => setFormData({ ...formData, is_new_arrival: e.target.checked } as any)}
+                    className="rounded bg-white/10 border-white/20 text-blue-500 focus:ring-blue-500"
+                  />
+                  <span className="text-sm flex items-center gap-1 text-white/80"><Calendar size={14} className="text-blue-500" /> New</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={(formData as any).is_trending}
+                    onChange={(e) => setFormData({ ...formData, is_trending: e.target.checked } as any)}
+                    className="rounded bg-white/10 border-white/20 text-purple-500 focus:ring-purple-500"
+                  />
+                  <span className="text-sm flex items-center gap-1 text-white/80"><Activity size={14} className="text-purple-500" /> Trending</span>
+                </label>
+              </div>
             </div>
             <div>
               <label className="block text-sm text-white/70 mb-2">Status</label>
@@ -2757,7 +3272,7 @@ function ProductModal({ product, onClose, onSave }: { product: Product | null; o
   )
 }
 
-function MixtapeModal({ mixtape, onClose, onSave }: { mixtape: Mixtape | null; onClose: () => void; onSave: (data: any, imageFile: File | null) => Promise<void> }) {
+function MixtapeModal({ mixtape, onClose, onSave, channels = [] }: { mixtape: Mixtape | null; onClose: () => void; onSave: (data: any, imageFile: File | null) => Promise<void>; channels?: { id: string; name: string }[] }) {
   const [formData, setFormData] = useState({
     title: mixtape?.title || '',
     description: mixtape?.description || '',
@@ -2769,7 +3284,10 @@ function MixtapeModal({ mixtape, onClose, onSave }: { mixtape: Mixtape | null; o
     status: mixtape?.status || 'active' as 'active' | 'inactive',
     audio_download_url: mixtape?.audio_download_url || '',
     video_download_url: mixtape?.video_download_url || '',
-    embed_url: mixtape?.embed_url || ''
+    embed_url: mixtape?.embed_url || '',
+    telegram_channel_id: (mixtape as any)?.telegram_channel_id || '',
+    is_hot: (mixtape as any)?.is_hot || false,
+    is_new_arrival: (mixtape as any)?.is_new_arrival || false
   })
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string>(mixtape?.cover_image || (mixtape as any)?.coverImage || '')
@@ -2889,38 +3407,34 @@ function MixtapeModal({ mixtape, onClose, onSave }: { mixtape: Mixtape | null; o
             )}
           </div>
 
-          <div>
-            <label className="block text-sm text-white/70 mb-2">Genre</label>
-            <input
-              type="text"
-              value={formData.genre}
-              onChange={(e) => setFormData({ ...formData, genre: e.target.value })}
-              placeholder="Afrobeats, House, etc."
-              className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-fuchsia-500/50"
-            />
-          </div>
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={formData.isFree}
-                onChange={(e) => setFormData({ ...formData, isFree: e.target.checked })}
-                className="w-4 h-4 rounded"
-              />
-              <span className="text-sm">Free mixtape</span>
-            </label>
-          </div>
-          {!formData.isFree && (
+          <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm text-white/70 mb-2">Price (KES)</label>
+              <label className="block text-sm text-white/70 mb-2">Genre</label>
               <input
-                type="number"
-                value={formData.price}
-                onChange={(e) => setFormData({ ...formData, price: Number(e.target.value) })}
+                type="text"
+                value={formData.genre}
+                onChange={(e) => setFormData({ ...formData, genre: e.target.value })}
+                placeholder="Afrobeats, House, etc."
                 className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-fuchsia-500/50"
               />
             </div>
-          )}
+            {channels.length > 0 && (
+              <div>
+                <label className="block text-sm text-white/70 mb-2">Telegram Channel</label>
+                <select
+                  value={formData.telegram_channel_id}
+                  onChange={(e) => setFormData({ ...formData, telegram_channel_id: e.target.value })}
+                  className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-fuchsia-500/50"
+                >
+                  <option value="" className="bg-zinc-900">Select Channel</option>
+                  {channels.map(c => (
+                    <option key={c.id} value={c.id} className="bg-zinc-900">{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
           <div>
             <label className="block text-sm text-white/70 mb-2">Description</label>
             <textarea
@@ -2957,7 +3471,7 @@ function MixtapeModal({ mixtape, onClose, onSave }: { mixtape: Mixtape | null; o
   )
 }
 
-function TrackModal({ track, onClose, onSave }: { track: MusicPoolTrack | null; onClose: () => void; onSave: (data: any, imageFile: File | null) => Promise<void> }) {
+function TrackModal({ track, onClose, onSave, channels = [] }: { track: MusicPoolTrack | null; onClose: () => void; onSave: (data: any, imageFile: File | null) => Promise<void>; channels?: { id: string; name: string }[] }) {
   const [formData, setFormData] = useState({
     title: track?.title || '',
     artist: track?.artist || '',
@@ -2966,6 +3480,10 @@ function TrackModal({ track, onClose, onSave }: { track: MusicPoolTrack | null; 
     trackLink: track?.trackLink || '',
     coverImage: track?.coverImage || '',
     tier: track?.tier || 'basic' as 'basic' | 'pro' | 'unlimited',
+    is_hot: (track as any)?.is_hot || false,
+    is_new_arrival: (track as any)?.is_new_arrival || false,
+    telegram_channel_id: (track as any)?.telegram_channel_id || '',
+    is_active: true
   })
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string>(track?.coverImage || '')
@@ -3069,17 +3587,57 @@ function TrackModal({ track, onClose, onSave }: { track: MusicPoolTrack | null; 
               />
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Tier</label>
+              <select
+                value={formData.tier}
+                onChange={(e) => setFormData({ ...formData, tier: e.target.value as any })}
+                className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-amber-500/50"
+              >
+                <option value="basic" className="bg-zinc-900">Basic</option>
+                <option value="pro" className="bg-zinc-900">Pro</option>
+                <option value="unlimited" className="bg-zinc-900">Unlimited</option>
+              </select>
+            </div>
+            {channels.length > 0 && (
+              <div>
+                <label className="block text-sm text-white/70 mb-2">Telegram Channel</label>
+                <select
+                  value={formData.telegram_channel_id}
+                  onChange={(e) => setFormData({ ...formData, telegram_channel_id: e.target.value })}
+                  className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-amber-500/50"
+                >
+                  <option value="" className="bg-zinc-900">Select Channel</option>
+                  {channels.map(c => (
+                    <option key={c.id} value={c.id} className="bg-zinc-900">{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
           <div>
-            <label className="block text-sm text-white/70 mb-2">Required Tier</label>
-            <select
-              value={formData.tier}
-              onChange={(e) => setFormData({ ...formData, tier: e.target.value as 'basic' | 'pro' | 'unlimited' })}
-              className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-amber-500/50"
-            >
-              <option value="basic">Basic</option>
-              <option value="pro">Pro</option>
-              <option value="unlimited">Unlimited</option>
-            </select>
+            <label className="block text-sm text-white/70 mb-2">Marketing Tags</label>
+            <div className="flex gap-4 bg-white/5 p-3 rounded-xl border border-white/10">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={(formData as any).is_hot}
+                  onChange={(e) => setFormData({ ...formData, is_hot: e.target.checked } as any)}
+                  className="rounded bg-white/10 border-white/20 text-orange-500 focus:ring-orange-500"
+                />
+                <span className="text-sm flex items-center gap-1 text-white/80"><TrendingUp size={14} className="text-orange-500" /> Hot</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={(formData as any).is_new_arrival}
+                  onChange={(e) => setFormData({ ...formData, is_new_arrival: e.target.checked } as any)}
+                  className="rounded bg-white/10 border-white/20 text-blue-500 focus:ring-blue-500"
+                />
+                <span className="text-sm flex items-center gap-1 text-white/80"><Calendar size={14} className="text-blue-500" /> New</span>
+              </label>
+            </div>
           </div>
           {error && (
             <div className="p-3 rounded-xl bg-red-500/20 border border-red-500/30 text-red-400 text-sm">
@@ -3249,7 +3807,7 @@ function ChannelManagementModal({ channels, onClose, onSave }: { channels: Teleg
 }
 
 function PaymentConfigModal({ type, settings, onClose, onSave }: { type: 'paystack' | 'mpesa'; settings: SiteSettings; onClose: () => void; onSave: (data: any) => Promise<void> }) {
-  const [formData, setFormData] = useState(
+  const [formData, setFormData] = useState<Partial<SiteSettings>>(
     type === 'paystack'
       ? { paystackPublicKey: settings.paystackPublicKey, paystackSecretKey: settings.paystackSecretKey }
       : { mpesaConsumerKey: settings.mpesaConsumerKey, mpesaConsumerSecret: settings.mpesaConsumerSecret }
