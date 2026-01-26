@@ -54,16 +54,15 @@ export default function SignupPage() {
 
     const { error } = await signUp(email, password, name)
 
+
     if (error) {
       toast.error(error)
       setLoading(false)
       return
     }
 
-    toast.info('Account created! Please check your email to verify your account before logging in.', {
-      duration: 5000,
-    })
-    router.push('/login')
+    // Success! Redirect to check email page
+    router.push('/check-email')
   }
 
   return (

@@ -1,70 +1,76 @@
-import { initializeApp, getApps, cert, App, applicationDefault } from 'firebase-admin/app'
-import { getAuth } from 'firebase-admin/auth'
-import { getFirestore } from 'firebase-admin/firestore'
+import { initializeApp, getApps, cert, App } from 'firebase-admin/app';
+import { getFirestore, Firestore } from 'firebase-admin/firestore';
+import { getAuth, Auth } from 'firebase-admin/auth';
 
-let adminApp: App
+let app: App | undefined;
+let db: Firestore | undefined;
+let auth: Auth | undefined;
 
-function initializeFirebaseAdmin() {
-  if (getApps().length) {
-    return getApps()[0]
-  }
+import { Buffer } from 'buffer';
 
-  const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
-
-  // Try Base64 encoded JSON first (safest for env variables)
+function getServiceAccount() {
+  // Try base64 encoded service account first
   if (process.env.FIREBASE_SERVICE_ACCOUNT_B64) {
     try {
-      const jsonStr = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_B64, 'base64').toString('utf-8')
-      const serviceAccount = JSON.parse(jsonStr)
-      return initializeApp({
-        credential: cert(serviceAccount),
-        projectId,
-      })
-    } catch (error) {
-      console.error('FIREBASE_ADMIN_INIT_ERROR (B64):', error)
+      const decoded = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_B64, 'base64').toString('utf-8');
+      return JSON.parse(decoded);
+    } catch (e) {
+      console.error('Failed to parse FIREBASE_SERVICE_ACCOUNT_B64:', e);
     }
   }
 
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+  // Try JSON string
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     try {
-      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY)
-      return initializeApp({
-        credential: cert(serviceAccount),
-        projectId,
-      })
-    } catch (error) {
-      console.error('FIREBASE_ADMIN_INIT_ERROR (JSON):', error)
+      return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    } catch (e) {
+      console.error('Failed to parse FIREBASE_SERVICE_ACCOUNT:', e);
     }
   }
 
-  if (process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
-    try {
-      const privateKey = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-      return initializeApp({
-        credential: cert({
-          projectId,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey,
-        }),
-        projectId,
-      })
-    } catch (error) {
-      console.error('FIREBASE_ADMIN_INIT_ERROR (ENV):', error)
-    }
+  // Try individual fields
+  if (process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY && process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) {
+    return {
+      client_email: process.env.FIREBASE_CLIENT_EMAIL,
+      private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      project_id: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    };
   }
 
-  try {
-    return initializeApp({
-      credential: applicationDefault(),
-      projectId,
-    })
-  } catch {
-    return initializeApp({ projectId })
-  }
+  // Warning only - return null so we can handle it 
+  console.warn('⚠️ No Firebase service account credentials found in environment variables. This is expected during build time.');
+  return null;
 }
 
-adminApp = initializeFirebaseAdmin()
+// Initialize Firebase Admin
+if (!getApps().length) {
+  try {
+    const serviceAccount = getServiceAccount();
+    if (serviceAccount) {
+      app = initializeApp({
+        credential: cert(serviceAccount)
+      });
+      console.log('✅ Firebase Admin initialized');
+    } else {
+      console.warn('⚠️ Skipping Firebase Admin initialization (missing credentials)');
+      // Create a dummy app/db structure or let it fail at usage time?
+      // Better to throw if we actually need it, but during build we just want to load.
+      // We can't really mock the whole app easily. 
+      // But if we don't assign 'app', getFirestore(app) below will fail unless we guard that too.
+    }
+  } catch (error) {
+    console.error('❌ Failed to initialize Firebase Admin:', error);
+    // Don't throw during build to allow static generation to proceed (unless strictly required)
+    // throw error; 
+  }
+} else {
+  app = getApps()[0];
+}
 
-export const adminAuth = getAuth(adminApp)
-export const adminDb = getFirestore(adminApp)
-export { adminApp }
+// Export initialized services
+if (app) {
+  db = getFirestore(app);
+  auth = getAuth(app);
+}
+
+export { app, db, auth };

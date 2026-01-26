@@ -176,7 +176,7 @@ interface SiteSettings {
 type TabType = 'dashboard' | 'users' | 'products' | 'mixtapes' | 'music-pool' | 'subscriptions' | 'bookings' | 'payments' | 'tips' | 'telegram' | 'reports' | 'settings' | 'orders'
 
 
-function UserDetailModal({ user, onClose }: { user: User; onClose: () => void }) {
+function UserDetailModal({ user, onClose }: { user: UserData; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
       <div className="bg-[#12121a] rounded-2xl border border-white/10 w-full max-w-lg">
@@ -247,7 +247,7 @@ function AdminContent() {
     totalTips: 0,
     pendingOrders: 0
   })
-  const [users, setUsers] = useState<User[]>([])
+  const [users, setUsers] = useState<UserData[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [mixtapes, setMixtapes] = useState<Mixtape[]>([])
   const [musicPool, setMusicPool] = useState<MusicPoolTrack[]>([])
@@ -672,7 +672,7 @@ function AdminContent() {
               getStatusBadge={getStatusBadge}
               onDelete={handleDeleteMixtape}
               onAdd={() => { setEditingItem(null); setShowMixtapeModal(true) }}
-              onEdit={(m) => { setEditingItem(m); setShowMixtapeModal(true) }}
+              onEdit={(m: Mixtape) => { setEditingItem(m); setShowMixtapeModal(true) }}
             />
           )}
 
@@ -681,13 +681,12 @@ function AdminContent() {
               tracks={musicPool}
               subscriptions={subscriptions}
               searchQuery={searchQuery}
-              searchQuery={searchQuery}
               plans={plans}
               onDelete={handleDeleteTrack}
               onAdd={() => { setEditingItem(null); setShowTrackModal(true) }}
-              onEdit={(t) => { setEditingItem(t); setShowTrackModal(true) }}
+              onEdit={(t: MusicPoolTrack) => { setEditingItem(t); setShowTrackModal(true) }}
               onAddPlan={() => { setEditingPlan(null); setShowPlanModal(true) }}
-              onEditPlan={(p) => { setEditingPlan(p); setShowPlanModal(true) }}
+              onEditPlan={(p: Plan) => { setEditingPlan(p); setShowPlanModal(true) }}
               onDeletePlan={handleDeletePlan}
             />
           )}
@@ -726,6 +725,7 @@ function AdminContent() {
           {activeTab === 'tips' && (
             <TipsTab
               tips={tips}
+              searchQuery={searchQuery}
               formatCurrency={formatCurrency}
               formatDate={formatDate}
             />
@@ -861,7 +861,7 @@ function AdminContent() {
                 console.log('✅ Mixtape updated successfully')
               } else {
                 const docRef = await addDoc(collection(db, 'mixtapes'), { ...saveData, created_at: new Date().toISOString(), plays: 0 })
-                setMixtapes([{ id: docRef.id, ...saveData, plays: 0, created_at: new Date().toISOString() } as Mixtape, ...mixtapes])
+                setMixtapes([{ ...saveData, id: docRef.id, plays: 0, created_at: new Date().toISOString() } as Mixtape, ...mixtapes])
                 console.log('✅ Mixtape created successfully:', docRef.id)
               }
               setShowMixtapeModal(false)
@@ -890,7 +890,7 @@ function AdminContent() {
           onSave={async (data, imageFile) => {
             try {
               console.log('🔄 Starting track save...', { isEdit: !!editingItem, hasImage: !!imageFile })
-              let cover_image = data.coverImage || data.cover_image || ''
+              let cover_image = data.coverImage || ''
 
               if (imageFile) {
                 console.log('📤 Uploading track cover image...')
@@ -900,18 +900,16 @@ function AdminContent() {
                 console.log('✅ Image uploaded successfully')
               }
 
-              const saveData = { ...data, cover_image, coverImage: undefined }
-              // Remove coverImage field to avoid duplication
-              delete saveData.coverImage
+              const saveData: any = { ...data, coverImage: cover_image, cover_image: cover_image }
 
               console.log('💾 Saving to Firestore...', { collection: 'music_pool', isEdit: !!editingItem })
               if (editingItem) {
                 await updateDoc(doc(db, 'music_pool', editingItem.id), saveData)
-                setMusicPool(musicPool.map(t => t.id === editingItem.id ? { ...t, ...saveData } : t))
+                setMusicPool(musicPool.map(t => t.id === editingItem.id ? { ...t, ...saveData } as MusicPoolTrack : t))
                 console.log('✅ Track updated successfully')
               } else {
                 const docRef = await addDoc(collection(db, 'music_pool'), { ...saveData, created_at: new Date().toISOString(), downloads: 0 })
-                setMusicPool([{ id: docRef.id, ...saveData, downloads: 0, created_at: new Date().toISOString() } as MusicPoolTrack, ...musicPool])
+                setMusicPool([{ ...saveData, id: docRef.id, downloads: 0, created_at: new Date().toISOString() } as MusicPoolTrack, ...musicPool])
                 console.log('✅ Track created successfully:', docRef.id)
               }
               setShowTrackModal(false)
@@ -1082,8 +1080,8 @@ function DashboardTab({ stats, bookings, transactions, formatCurrency, formatDat
   )
 }
 
-function UsersTab({ users, searchQuery, formatDate, getStatusBadge, onUpdateStatus, onUpdateRole, onViewUser }: { users: User[]; searchQuery: string; formatDate: (d: string) => string; getStatusBadge: (s: string) => string; onUpdateStatus: (id: string, status: string) => void; onUpdateRole: (id: string, role: string) => void; onViewUser: (u: User) => void }) {
-  const filteredUsers = users.filter((u: User) =>
+function UsersTab({ users, searchQuery, formatDate, getStatusBadge, onUpdateStatus, onUpdateRole, onViewUser }: { users: UserData[]; searchQuery: string; formatDate: (d: string) => string; getStatusBadge: (s: string) => string; onUpdateStatus: (id: string, status: string) => void; onUpdateRole: (id: string, role: string) => void; onViewUser: (u: UserData) => void }) {
+  const filteredUsers = users.filter((u: UserData) =>
     u.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     u.email?.toLowerCase().includes(searchQuery.toLowerCase())
   )
@@ -1108,7 +1106,7 @@ function UsersTab({ users, searchQuery, formatDate, getStatusBadge, onUpdateStat
               </tr>
             </thead>
             <tbody>
-              {filteredUsers.map((u: User) => (
+              {filteredUsers.map((u: UserData) => (
                 <tr key={u.id} className="border-b border-white/5 hover:bg-white/5">
                   <td className="p-4">
                     <p className="font-medium">{u.name || 'No name'}</p>
@@ -2162,14 +2160,14 @@ function TipsTab({ tips, searchQuery, formatCurrency, formatDate }: { tips: Tip[
   )
 }
 
-function TelegramTab({ subscriptions, users, settings, onConfigureToken, onManageChannels, onToggleAutoSync }: { subscriptions: Subscription[]; users: User[]; settings: SiteSettings; onConfigureToken: () => void; onManageChannels: () => void; onToggleAutoSync: () => void }) {
+function TelegramTab({ subscriptions, users, settings, onConfigureToken, onManageChannels, onToggleAutoSync }: { subscriptions: Subscription[]; users: UserData[]; settings: SiteSettings; onConfigureToken: () => void; onManageChannels: () => void; onToggleAutoSync: () => void }) {
   const [userSearch, setUserSearch] = useState('')
   const activeSubscribers = subscriptions.filter((s: Subscription) => s.status === 'active')
-  const connectedUsers = users.filter((u: User) => u.telegram_user_id || u.telegram_username)
+  const connectedUsers = users.filter((u: UserData) => u.telegram_user_id || u.telegram_username)
 
-  const filteredUsers = connectedUsers.filter((u: User) =>
+  const filteredUsers = connectedUsers.filter((u: UserData) =>
     u.email?.toLowerCase().includes(userSearch.toLowerCase()) ||
-    u.telegram_username?.toLowerCase().includes(userSearch.toLowerCase())
+    u.name?.toLowerCase().includes(userSearch.toLowerCase())
   )
 
   const mockLogs = [
@@ -2269,7 +2267,7 @@ function TelegramTab({ subscriptions, users, settings, onConfigureToken, onManag
                     <td colSpan={3} className="p-8 text-center text-white/40">No connected users found</td>
                   </tr>
                 ) : (
-                  filteredUsers.slice(0, 5).map((u: User) => (
+                  filteredUsers.slice(0, 5).map((u: UserData) => (
                     <tr key={u.id} className="border-b border-white/5">
                       <td className="p-3">
                         <div className="font-medium">{u.name || 'User'}</div>
@@ -2310,7 +2308,7 @@ function TelegramTab({ subscriptions, users, settings, onConfigureToken, onManag
   )
 }
 
-function ReportsTab({ users, transactions, bookings }: { users: User[]; transactions: Transaction[]; bookings: Booking[] }) {
+function ReportsTab({ users, transactions, bookings }: { users: UserData[]; transactions: Transaction[]; bookings: Booking[] }) {
   return (
     <div className="space-y-6">
       <h3 className="text-lg font-semibold">Reports & Analytics</h3>
@@ -3007,7 +3005,7 @@ function ProductModal({ product, onClose, onSave }: { product: Product | null; o
             <div>
               <label className="block text-sm text-white/70 mb-2">Category</label>
               <select
-                value={formData.category}
+                value={formData.category || ''}
                 onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                 className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50"
               >
@@ -3092,7 +3090,7 @@ function ProductModal({ product, onClose, onSave }: { product: Product | null; o
                   <label className="block text-xs text-white/50 mb-1">Amount (KES)</label>
                   <input
                     type="number"
-                    value={formData.price}
+                    value={formData.price || ''}
                     onChange={(e) => setFormData({ ...formData, price: Number(e.target.value) })}
                     className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50"
                   />
@@ -3125,7 +3123,7 @@ function ProductModal({ product, onClose, onSave }: { product: Product | null; o
                   <label className="block text-sm text-white/70 mb-2">Version (e.g. v1.0.0)</label>
                   <input
                     type="text"
-                    value={formData.version}
+                    value={formData.version || ''}
                     onChange={(e) => setFormData({ ...formData, version: e.target.value })}
                     className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50"
                   />
@@ -3136,7 +3134,7 @@ function ProductModal({ product, onClose, onSave }: { product: Product | null; o
                   </label>
                   <input
                     type="text"
-                    value={formData.download_file_path}
+                    value={formData.download_file_path || ''}
                     onChange={(e) => setFormData({ ...formData, download_file_path: e.target.value })}
                     placeholder={formData.is_free ? 'https://...' : '/api/downloads/...'}
                     className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50"
@@ -3165,7 +3163,7 @@ function ProductModal({ product, onClose, onSave }: { product: Product | null; o
                   <label className="block text-sm text-white/70 mb-2">Post-payment Message</label>
                   <input
                     type="text"
-                    value={formData.post_payment_message}
+                    value={formData.post_payment_message || ''}
                     onChange={(e) => setFormData({ ...formData, post_payment_message: e.target.value })}
                     className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-violet-500/50"
                   />
@@ -3180,7 +3178,7 @@ function ProductModal({ product, onClose, onSave }: { product: Product | null; o
                   <label className="block text-sm text-white/70 mb-2">Stock Quantity</label>
                   <input
                     type="number"
-                    value={formData.stock_quantity}
+                    value={formData.stock_quantity || ''}
                     onChange={(e) => setFormData({ ...formData, stock_quantity: Number(e.target.value) })}
                     className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-emerald-500/50"
                   />
@@ -3189,7 +3187,7 @@ function ProductModal({ product, onClose, onSave }: { product: Product | null; o
                   <label className="block text-sm text-white/70 mb-2">SKU</label>
                   <input
                     type="text"
-                    value={formData.sku}
+                    value={formData.sku || ''}
                     onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
                     className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-emerald-500/50"
                   />
@@ -3212,7 +3210,7 @@ function ProductModal({ product, onClose, onSave }: { product: Product | null; o
                   <label className="block text-sm text-white/70 mb-2">Est. Delivery Time</label>
                   <input
                     type="text"
-                    value={formData.estimated_delivery_time}
+                    value={formData.estimated_delivery_time || ''}
                     onChange={(e) => setFormData({ ...formData, estimated_delivery_time: e.target.value })}
                     placeholder="e.g. 3-5 days"
                     className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-emerald-500/50"
@@ -3272,7 +3270,7 @@ function ProductModal({ product, onClose, onSave }: { product: Product | null; o
   )
 }
 
-function MixtapeModal({ mixtape, onClose, onSave, channels = [] }: { mixtape: Mixtape | null; onClose: () => void; onSave: (data: any, imageFile: File | null) => Promise<void>; channels?: { id: string; name: string }[] }) {
+function MixtapeModal({ mixtape, onClose, onSave, channels = [] }: { mixtape: Mixtape | null; onClose: () => void; onSave: (data: Partial<Mixtape>, imageFile: File | null) => Promise<void>; channels?: { id: string; name: string }[] }) {
   const [formData, setFormData] = useState({
     title: mixtape?.title || '',
     description: mixtape?.description || '',
@@ -3315,7 +3313,7 @@ function MixtapeModal({ mixtape, onClose, onSave, channels = [] }: { mixtape: Mi
         ...formData,
         price: (formData.price || 0) * 100
       }
-      await onSave(dataToSave, imageFile)
+      await onSave(dataToSave as Partial<Mixtape>, imageFile)
     } catch (err: any) {
       setError(err.message || 'Failed to save')
       setSaving(false)
@@ -3354,7 +3352,7 @@ function MixtapeModal({ mixtape, onClose, onSave, channels = [] }: { mixtape: Mi
             <label className="block text-sm text-white/70 mb-2">Title</label>
             <input
               type="text"
-              value={formData.title}
+              value={formData.title || ''}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
               className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-fuchsia-500/50"
             />
@@ -3365,7 +3363,7 @@ function MixtapeModal({ mixtape, onClose, onSave, channels = [] }: { mixtape: Mi
               <label className="block text-sm text-white/70 mb-2">Audio Download Link</label>
               <input
                 type="url"
-                value={formData.audio_download_url}
+                value={formData.audio_download_url || ''}
                 onChange={(e) => setFormData({ ...formData, audio_download_url: e.target.value })}
                 placeholder="https://..."
                 className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-fuchsia-500/50"
@@ -3375,7 +3373,7 @@ function MixtapeModal({ mixtape, onClose, onSave, channels = [] }: { mixtape: Mi
               <label className="block text-sm text-white/70 mb-2">Video Download Link</label>
               <input
                 type="url"
-                value={formData.video_download_url}
+                value={formData.video_download_url || ''}
                 onChange={(e) => setFormData({ ...formData, video_download_url: e.target.value })}
                 placeholder="https://..."
                 className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-fuchsia-500/50"
@@ -3386,7 +3384,7 @@ function MixtapeModal({ mixtape, onClose, onSave, channels = [] }: { mixtape: Mi
           <div>
             <label className="block text-sm text-white/70 mb-2">Embed Code / Link</label>
             <textarea
-              value={formData.embed_url}
+              value={formData.embed_url || ''}
               onChange={(e) => setFormData({ ...formData, embed_url: e.target.value })}
               placeholder={'<iframe src="..." ...></iframe> or https://...'}
               rows={2}
@@ -3412,7 +3410,7 @@ function MixtapeModal({ mixtape, onClose, onSave, channels = [] }: { mixtape: Mi
               <label className="block text-sm text-white/70 mb-2">Genre</label>
               <input
                 type="text"
-                value={formData.genre}
+                value={formData.genre || ''}
                 onChange={(e) => setFormData({ ...formData, genre: e.target.value })}
                 placeholder="Afrobeats, House, etc."
                 className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-fuchsia-500/50"
@@ -3422,7 +3420,7 @@ function MixtapeModal({ mixtape, onClose, onSave, channels = [] }: { mixtape: Mi
               <div>
                 <label className="block text-sm text-white/70 mb-2">Telegram Channel</label>
                 <select
-                  value={formData.telegram_channel_id}
+                  value={formData.telegram_channel_id || ''}
                   onChange={(e) => setFormData({ ...formData, telegram_channel_id: e.target.value })}
                   className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-fuchsia-500/50"
                 >
@@ -3438,7 +3436,7 @@ function MixtapeModal({ mixtape, onClose, onSave, channels = [] }: { mixtape: Mi
           <div>
             <label className="block text-sm text-white/70 mb-2">Description</label>
             <textarea
-              value={formData.description}
+              value={formData.description || ''}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               rows={3}
               className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-fuchsia-500/50 resize-none"
@@ -3471,7 +3469,7 @@ function MixtapeModal({ mixtape, onClose, onSave, channels = [] }: { mixtape: Mi
   )
 }
 
-function TrackModal({ track, onClose, onSave, channels = [] }: { track: MusicPoolTrack | null; onClose: () => void; onSave: (data: any, imageFile: File | null) => Promise<void>; channels?: { id: string; name: string }[] }) {
+function TrackModal({ track, onClose, onSave, channels = [] }: { track: MusicPoolTrack | null; onClose: () => void; onSave: (data: Partial<MusicPoolTrack>, imageFile: File | null) => Promise<void>; channels?: { id: string; name: string }[] }) {
   const [formData, setFormData] = useState({
     title: track?.title || '',
     artist: track?.artist || '',
@@ -3507,7 +3505,7 @@ function TrackModal({ track, onClose, onSave, channels = [] }: { track: MusicPoo
     setSaving(true)
     setError('')
     try {
-      await onSave(formData, imageFile)
+      await onSave(formData as Partial<MusicPoolTrack>, imageFile)
     } catch (err: any) {
       setError(err.message || 'Failed to save')
       setSaving(false)
@@ -3543,7 +3541,7 @@ function TrackModal({ track, onClose, onSave, channels = [] }: { track: MusicPoo
             <label className="block text-sm text-white/70 mb-2">Title</label>
             <input
               type="text"
-              value={formData.title}
+              value={formData.title || ''}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
               className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-amber-500/50"
             />
@@ -3552,7 +3550,7 @@ function TrackModal({ track, onClose, onSave, channels = [] }: { track: MusicPoo
             <label className="block text-sm text-white/70 mb-2">Artist</label>
             <input
               type="text"
-              value={formData.artist}
+              value={formData.artist || ''}
               onChange={(e) => setFormData({ ...formData, artist: e.target.value })}
               className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-amber-500/50"
             />
@@ -3561,7 +3559,7 @@ function TrackModal({ track, onClose, onSave, channels = [] }: { track: MusicPoo
             <label className="block text-sm text-white/70 mb-2">Track Link (External URL)</label>
             <input
               type="url"
-              value={formData.trackLink}
+              value={formData.trackLink || ''}
               onChange={(e) => setFormData({ ...formData, trackLink: e.target.value })}
               placeholder="https://..."
               className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-amber-500/50"

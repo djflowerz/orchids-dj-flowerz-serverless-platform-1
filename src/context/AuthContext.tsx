@@ -170,9 +170,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return
         }
 
+        // Sync auth cookie with server for Edge Runtime compatibility
+        try {
+          const idToken = await firebaseUser.getIdToken()
+          const { syncAuthCookie } = await import('@/lib/auth-cookie-sync')
+          await syncAuthCookie(idToken)
+        } catch (error) {
+          console.error('[AuthContext] Failed to sync auth cookie:', error)
+        }
+
         const userProfile = await getUserProfile(firebaseUser)
         setUser(userProfile)
       } else {
+        // Clear auth cookie when user signs out
+        try {
+          const { clearAuthCookie } = await import('@/lib/auth-cookie-sync')
+          await clearAuthCookie()
+        } catch (error) {
+          console.error('[AuthContext] Failed to clear auth cookie:', error)
+        }
         setUser(null)
       }
       setLoading(false)

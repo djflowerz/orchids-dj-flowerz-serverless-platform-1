@@ -3,37 +3,29 @@
 import { useState, useEffect } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
-import { ArrowLeft, Download, Lock, Check, Clock, Calendar, ShoppingCart, Share2, Music, Play, Headphones } from 'lucide-react'
+import { ArrowLeft, Download, Clock, Calendar, Share2, Music, Video, Headphones } from 'lucide-react'
 import { toast } from 'sonner'
-import { useAuth } from '@/context/AuthContext'
-import { useCart } from '@/context/CartContext'
 import { Mixtape } from '@/lib/types'
-import { formatCurrency } from '@/lib/utils'
 import { AudioPlayer } from '@/components/ui/AudioPlayer'
 
 export function MixtapeDetail({ mixtape }: { mixtape: Mixtape }) {
-  const { user, hasPurchased } = useAuth()
-  const { addToCart } = useCart()
-  const [purchased, setPurchased] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<'audio' | 'video'>('audio')
   const [showPlayer, setShowPlayer] = useState(true)
 
+  // Determine what's available
+  const hasAudio = !!(mixtape.audio_download_url || mixtape.audio_url || mixtape.download_url)
+  const hasVideo = !!(mixtape.video_download_url || mixtape.video_url)
+
+  // Set default tab based on availability
   useEffect(() => {
-    async function checkPurchase() {
-      if (user && mixtape.is_paid) {
-        const result = await hasPurchased(undefined, mixtape.id)
-        setPurchased(result)
-      }
-      setLoading(false)
+    if (!hasAudio && hasVideo) {
+      setActiveTab('video')
     }
-    checkPurchase()
-  }, [user, mixtape.id, mixtape.is_paid, hasPurchased])
+  }, [hasAudio, hasVideo])
 
-  const canAccess = !mixtape.is_paid || purchased
-
-  const handleAddToCart = () => {
-    addToCart(mixtape, 'mixtape')
-    toast.success('Added to cart!')
+  const handleDownload = (format: 'audio' | 'video') => {
+    // Use secure download endpoint
+    window.location.href = `/api/download?mixtape_id=${mixtape.id}&format=${format}`
   }
 
   const handleShare = () => {
@@ -43,14 +35,6 @@ export function MixtapeDetail({ mixtape }: { mixtape: Mixtape }) {
 
   const tracklist = Array.isArray(mixtape.tracklist) ? mixtape.tracklist :
     (typeof mixtape.tracklist === 'string' ? JSON.parse(mixtape.tracklist) : [])
-
-  const audioTrack = mixtape.audio_url ? {
-    id: mixtape.id,
-    title: mixtape.title,
-    artist: mixtape.dj,
-    audioUrl: mixtape.audio_url,
-    coverImage: mixtape.cover_image || undefined
-  } : null
 
   return (
     <div className="min-h-screen bg-black">
@@ -88,9 +72,11 @@ export function MixtapeDetail({ mixtape }: { mixtape: Mixtape }) {
             <div className="flex items-center gap-3 mb-4">
               <span className="px-3 py-1 rounded-full bg-green-500/20 text-green-400 text-sm font-medium flex items-center gap-1">
                 <Download size={14} />
-                Free Mixtape
+                Free Download
               </span>
-              <span className="px-3 py-1 rounded-full bg-white/5 text-white/70 text-sm">{mixtape.genre}</span>
+              {mixtape.genre && (
+                <span className="px-3 py-1 rounded-full bg-white/5 text-white/70 text-sm">{mixtape.genre}</span>
+              )}
             </div>
 
             <h1 className="font-display text-4xl sm:text-5xl text-white mb-2">{mixtape.title}</h1>
@@ -119,71 +105,76 @@ export function MixtapeDetail({ mixtape }: { mixtape: Mixtape }) {
               <p className="text-white/70 mb-8">{mixtape.description}</p>
             )}
 
+            {/* Audio/Video Tabs */}
+            {(hasAudio || hasVideo) && (
+              <div className="mb-6">
+                <div className="flex gap-2 p-1 rounded-xl bg-white/5 border border-white/10 inline-flex">
+                  {hasAudio && (
+                    <button
+                      onClick={() => setActiveTab('audio')}
+                      className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'audio' ? 'bg-fuchsia-500 text-white' : 'text-white/50 hover:text-white'
+                        }`}
+                    >
+                      <Headphones size={16} />
+                      Audio
+                    </button>
+                  )}
+                  {hasVideo && (
+                    <button
+                      onClick={() => setActiveTab('video')}
+                      className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${activeTab === 'video' ? 'bg-cyan-500 text-white' : 'text-white/50 hover:text-white'
+                        }`}
+                    >
+                      <Video size={16} />
+                      Video
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Download Buttons */}
             <div className="flex flex-wrap gap-3 mb-8">
-              {mixtape.audio_url && (
+              {activeTab === 'audio' && hasAudio && (
                 <button
-                  onClick={() => setShowPlayer(!showPlayer)}
-                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-fuchsia-500 to-cyan-500 rounded-full text-white font-semibold hover:opacity-90 transition-all"
-                >
-                  <Headphones size={20} />
-                  {showPlayer ? 'Hide Player' : 'Stream Now'}
-                </button>
-              )}
-              {mixtape.audio_url && (
-                <a
-                  href={mixtape.audio_url}
-                  download
-                  className="flex items-center gap-2 px-6 py-3 bg-white/10 border border-white/10 rounded-full text-white font-semibold hover:bg-white/20 transition-all"
-                >
-                  <Download size={20} />
-                  Download Audio
-                </a>
-              )}
-              {/* Main Download Button for Mixtape File (e.g. ZIP) */}
-              {mixtape.download_url && canAccess && (
-                <a
-                  href={mixtape.download_url}
-                  download
+                  onClick={() => handleDownload('audio')}
                   className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full text-white font-semibold hover:opacity-90 transition-all shadow-lg shadow-green-500/20"
                 >
                   <Download size={20} />
-                  Download Full Mixtape
-                </a>
-              )}
-              {/* Pay to Unlock Button */}
-              {!canAccess && (
-                <button
-                  onClick={handleAddToCart}
-                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-fuchsia-500 to-cyan-500 rounded-full text-white font-semibold hover:opacity-90 transition-all shadow-lg shadow-fuchsia-500/20"
-                >
-                  <ShoppingCart size={20} />
-                  Buy to Download {mixtape.price ? `- ${formatCurrency(mixtape.price)}` : ''}
+                  Download MP3
                 </button>
               )}
-              {mixtape.video_url && canAccess && (
-                <a
-                  href={mixtape.video_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-6 py-3 bg-white/10 border border-white/10 rounded-full text-white font-semibold hover:bg-white/20 transition-all"
+              {activeTab === 'video' && hasVideo && (
+                <button
+                  onClick={() => handleDownload('video')}
+                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full text-white font-semibold hover:opacity-90 transition-all shadow-lg shadow-cyan-500/20"
                 >
                   <Download size={20} />
                   Download Video
-                </a>
+                </button>
               )}
+
               <button
                 onClick={handleShare}
                 className="flex items-center gap-2 px-4 py-3 bg-white/5 border border-white/10 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-all"
               >
                 <Share2 size={20} />
+                Share
               </button>
             </div>
 
-            {showPlayer && audioTrack && (
+            {/* Audio Player */}
+            {activeTab === 'audio' && hasAudio && mixtape.audio_url && (
               <div className="mb-8">
                 <AudioPlayer
-                  tracks={[audioTrack]}
-                  autoPlay={true}
+                  tracks={[{
+                    id: mixtape.id,
+                    title: mixtape.title,
+                    artist: mixtape.dj,
+                    audioUrl: mixtape.audio_url,
+                    coverImage: mixtape.cover_image || undefined
+                  }]}
+                  autoPlay={false}
                 />
               </div>
             )}
@@ -201,21 +192,6 @@ export function MixtapeDetail({ mixtape }: { mixtape: Mixtape }) {
                       <span>{track}</span>
                     </div>
                   ))}
-                </div>
-              </div>
-            )}
-
-            {mixtape.video_url && canAccess && (
-              <div className="mt-8">
-                <h3 className="text-white font-semibold mb-4">Video</h3>
-                <div className="aspect-video rounded-2xl overflow-hidden bg-white/5">
-                  <iframe
-                    src={mixtape.video_url.replace('watch?v=', 'embed/')}
-                    title={mixtape.title}
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                    className="w-full h-full"
-                  />
                 </div>
               </div>
             )}

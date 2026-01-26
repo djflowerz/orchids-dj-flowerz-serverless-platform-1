@@ -16,17 +16,32 @@ export default function Home() {
   useEffect(() => {
     async function fetchProducts() {
       try {
-        // Fetch trending products (published products, ordered by downloads/popularity)
-        const trendingQuery = query(
+        // Fetch candidates for trending (recent published products)
+        // We fetch more than 4 to allow manual tags to bubble up from recent additions
+        const q = query(
           collection(db, 'products'),
           where('status', '==', 'published'),
-          orderBy('downloads', 'desc'),
-          limit(4)
+          orderBy('created_at', 'desc'),
+          limit(20)
         )
-        const trendingSnap = await getDocs(trendingQuery)
-        const trending = trendingSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product))
+        const snapshot = await getDocs(q)
+        const products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product))
 
-        setTrendingProducts(trending)
+        // Client-side sort to prioritize manual tags
+        const sorted = products.sort((a, b) => {
+          // 1. Trending tag (highest priority)
+          if ((b as any).is_trending !== (a as any).is_trending) {
+            return (b as any).is_trending ? 1 : -1
+          }
+          // 2. Hot tag
+          if ((b as any).is_hot !== (a as any).is_hot) {
+            return (b as any).is_hot ? 1 : -1
+          }
+          // 3. Downloads (popularity fallback)
+          return ((b.downloads || 0) - (a.downloads || 0))
+        })
+
+        setTrendingProducts(sorted.slice(0, 4))
       } catch (error) {
         console.error('Error fetching products:', error)
       } finally {

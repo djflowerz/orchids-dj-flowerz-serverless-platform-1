@@ -2,9 +2,11 @@ export interface User {
   id: string
   email: string
   name: string | null
-  role: 'admin' | 'user'
+  role: 'admin' | 'user' | 'subscriber' | 'staff'
   subscription_status: 'active' | 'inactive' | 'expired'
   subscription_plan: string | null
+  subscription_tier?: string | null // Alias for plan or specific tier logic
+  account_status?: 'active' | 'suspended' | 'unverified' | 'banned'
   subscription_start: string | null
   subscription_end: string | null
   telegram_user_id: string | null
@@ -77,6 +79,9 @@ export interface Product {
   average_rating?: number
   review_count?: number
   downloads?: number
+  is_hot?: boolean
+  is_new_arrival?: boolean
+  is_trending?: boolean
 }
 
 export interface MusicPoolTrack {

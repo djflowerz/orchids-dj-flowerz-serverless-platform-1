@@ -32,9 +32,8 @@ export default function ProfilePage() {
     async function fetchOrders() {
       try {
         const q = query(
-          collection(db, 'payments'),
+          collection(db, 'orders'),
           where('user_email', '==', user?.email),
-          where('status', '==', 'success'),
           orderBy('created_at', 'desc')
         )
         const snapshot = await getDocs(q)
@@ -42,10 +41,13 @@ export default function ProfilePage() {
           const d = doc.data()
           return {
             id: doc.id,
-            ...d,
-            created_at: d.created_at?.toDate?.().toISOString() || new Date().toISOString()
+            user_email: d.user_email,
+            amount: d.total || d.amount || 0,
+            payment_type: d.items?.[0]?.title || 'Order',
+            status: d.status === 'paid' ? 'success' : d.status,
+            created_at: typeof d.created_at === 'string' ? d.created_at : d.created_at?.toDate?.()?.toISOString() || new Date().toISOString()
           }
-        }) as Payment[]
+        }) as unknown as Payment[]
         setOrders(data)
       } catch (error) {
         console.error('Error fetching orders:', error)
@@ -220,7 +222,9 @@ export default function ProfilePage() {
                   </div>
                   <div className="text-right">
                     <p className="text-white font-semibold">KSh {(order.amount / 100).toLocaleString()}</p>
-                    <span className="text-green-400 text-xs">Completed</span>
+                    <span className={`text-xs capitalize ${order.status === 'success' ? 'text-green-400' : 'text-amber-400'}`}>
+                      {order.status === 'success' ? 'Completed' : 'Pending'}
+                    </span>
                   </div>
                 </div>
               ))}

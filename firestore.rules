@@ -1,97 +1,58 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Helper function to check if user is admin
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
     function isAdmin() {
-      return request.auth != null && (
-        request.auth.token.email == 'ianmuriithiflowerz@gmail.com' || 
-        request.auth.token.role == 'admin' ||
-        request.auth.token.admin == true
-      );
-    }
-    
-    function isOwner(userId) {
-      return request.auth != null && request.auth.uid == userId;
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid))
+        .data.role == 'admin';
     }
 
-    // =========================================================================
-    // User Profiles & Purchases
-    // =========================================================================
+    function isSubscriber() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/subscriptions/$(request.auth.uid))
+        .data.status == 'active';
+    }
+
+    /* USERS */
     match /users/{userId} {
-      // Allow new users to create their profile
-      allow create: if request.auth != null && request.auth.uid == userId;
-      // Allow owners and admins to read/update/delete
-      allow read, update, delete: if isOwner(userId) || isAdmin();
-      
-      // Purchases subcollection (Added for secure access check)
-      match /purchases/{purchaseId} {
-        allow read: if isOwner(userId) || isAdmin();
-        allow write: if isAdmin(); // Only backend can write purchases
-      }
-    }
-
-    // =========================================================================
-    // Store Products & Secrets
-    // =========================================================================
-    // Public product info
-    match /products/{productId} {
-      allow read: if true;
-      allow write: if isAdmin();
-
-      // PROTECTED DATA: Only accessible if user has a purchase record for this product
-      match /privateData/secret {
-        allow read: if request.auth != null && (
-          exists(/databases/$(database)/documents/users/$(request.auth.uid)/purchases/$(productId)) || 
-          isAdmin()
-        );
-        allow write: if isAdmin();
-      }
-    }
-    
-    match /mixtapes/{mixtapeId} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-    
-    match /classifications/{docId} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-    
-    // Blog Posts
-    match /blog_posts/{postId} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    // =========================================================================
-    // Orders, Subscriptions, Tips
-    // =========================================================================
-    match /orders/{orderId} {
-      allow create: if true; // Allow guest orders
-      allow read: if (request.auth != null && resource.data.userId == request.auth.uid) || isAdmin();
-      allow update: if isAdmin(); 
-    }
-
-    match /subscriptions/{subId} {
-      allow create: if true; // Allow guest/public to create pending sub
-      allow read: if request.auth != null && (resource.data.user_id == request.auth.uid || isAdmin());
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow write: if request.auth.uid == userId;
       allow update: if isAdmin();
     }
 
-    match /tips/{tipId} {
-      allow create: if true; // Public tip jar
+    /* SUBSCRIPTIONS */
+    match /subscriptions/{userId} {
+      allow read: if request.auth.uid == userId || isAdmin();
+      allow write: if isAdmin(); // Only backend / webhook
+    }
+
+    /* MUSIC PACKS */
+    match /musicPacks/{packId} {
+      allow read: if true; // previews & metadata public
+      allow write, update, delete: if isAdmin();
+    }
+
+    /* DOWNLOAD LOGS */
+    match /downloads/{downloadId} {
+      allow create: if isSubscriber();
       allow read: if isAdmin();
-      allow update: if isAdmin();
     }
 
-    // =========================================================================
-    // Default Fallback
-    // =========================================================================
-    match /{document=**} {
-      allow read: if request.auth != null;
-      allow write: if isAdmin();
+    /* TIP JAR */
+    match /tips/{tipId} {
+      allow create: if isSignedIn();
+      allow read: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    /* ADMIN LOGS */
+    match /adminLogs/{logId} {
+      allow read, write: if isAdmin();
     }
   }
 }

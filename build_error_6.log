@@ -1,0 +1,48 @@
+
+> app@0.1.0 build
+> next build
+
+   ▲ Next.js 15.4.0
+   - Environments: .env.local
+
+   Creating an optimized production build ...
+Failed to compile.
+
+node:process
+Module build failed: UnhandledSchemeError: Reading from "node:process" is not handled by plugins (Unhandled scheme).
+Webpack supports "data:" and "file:" URIs by default.
+You may need an additional plugin to handle "node:" URIs.
+    at /Users/DJFLOWERZ/Desktop/dj-flowerz/node_modules/next/dist/compiled/webpack/bundle5.js:29:408351
+    at Hook.eval [as callAsync] (eval at create (/Users/DJFLOWERZ/Desktop/dj-flowerz/node_modules/next/dist/compiled/webpack/bundle5.js:14:9224), <anonymous>:6:1)
+    at Hook.CALL_ASYNC_DELEGATE [as _callAsync] (/Users/DJFLOWERZ/Desktop/dj-flowerz/node_modules/next/dist/compiled/webpack/bundle5.js:14:6378)
+    at Object.processResource (/Users/DJFLOWERZ/Desktop/dj-flowerz/node_modules/next/dist/compiled/webpack/bundle5.js:29:408276)
+    at processResource (/Users/DJFLOWERZ/Desktop/dj-flowerz/node_modules/next/dist/compiled/loader-runner/LoaderRunner.js:1:5308)
+    at iteratePitchingLoaders (/Users/DJFLOWERZ/Desktop/dj-flowerz/node_modules/next/dist/compiled/loader-runner/LoaderRunner.js:1:4667)
+    at runLoaders (/Users/DJFLOWERZ/Desktop/dj-flowerz/node_modules/next/dist/compiled/loader-runner/LoaderRunner.js:1:8590)
+    at NormalModule._doBuild (/Users/DJFLOWERZ/Desktop/dj-flowerz/node_modules/next/dist/compiled/webpack/bundle5.js:29:408138)
+    at NormalModule.build (/Users/DJFLOWERZ/Desktop/dj-flowerz/node_modules/next/dist/compiled/webpack/bundle5.js:29:410151)
+    at /Users/DJFLOWERZ/Desktop/dj-flowerz/node_modules/next/dist/compiled/webpack/bundle5.js:29:82479
+    at NormalModule.needBuild (/Users/DJFLOWERZ/Desktop/dj-flowerz/node_modules/next/dist/compiled/webpack/bundle5.js:29:414135)
+    at Compilation._buildModule (/Users/DJFLOWERZ/Desktop/dj-flowerz/node_modules/next/dist/compiled/webpack/bundle5.js:29:82196)
+    at /Users/DJFLOWERZ/Desktop/dj-flowerz/node_modules/next/dist/compiled/webpack/bundle5.js:29:1378123
+    at Hook.eval [as callAsync] (eval at create (/Users/DJFLOWERZ/Desktop/dj-flowerz/node_modules/next/dist/compiled/webpack/bundle5.js:14:9224), <anonymous>:6:1)
+    at AsyncQueue._startProcessing (/Users/DJFLOWERZ/Desktop/dj-flowerz/node_modules/next/dist/compiled/webpack/bundle5.js:29:1377994)
+    at AsyncQueue._ensureProcessing (/Users/DJFLOWERZ/Desktop/dj-flowerz/node_modules/next/dist/compiled/webpack/bundle5.js:29:1377843)
+    at process.processImmediate (node:internal/timers:485:21)
+
+Import trace for requested module:
+node:process
+./node_modules/google-logging-utils/build/src/logging-utils.js
+./node_modules/google-logging-utils/build/src/index.js
+./node_modules/gcp-metadata/build/src/index.js
+./node_modules/google-auth-library/build/src/index.js
+./node_modules/firebase-admin/lib/app/credential-internal.js
+./node_modules/firebase-admin/lib/utils/index.js
+./node_modules/firebase-admin/lib/app/index.js
+./node_modules/firebase-admin/lib/esm/app/index.js
+./src/lib/firebase-admin.ts
+./src/app/api/download/route.ts
+./node_modules/next/dist/build/webpack/loaders/next-app-loader/index.js?name=app%2Fapi%2Fdownload%2Froute&page=%2Fapi%2Fdownload%2Froute&pagePath=private-next-app-dir%2Fapi%2Fdownload%2Froute.ts&appDir=%2FUsers%2FDJFLOWERZ%2FDesktop%2Fdj-flowerz%2Fsrc%2Fapp&appPaths=%2Fapi%2Fdownload%2Froute&pageExtensions=tsx&pageExtensions=ts&pageExtensions=jsx&pageExtensions=js&basePath=&assetPrefix=&nextConfigOutput=&preferredRegion=&middlewareConfig=e30%3D&isGlobalNotFoundEnabled=!./src/app/api/download/route.ts?__next_edge_ssr_entry__
+
+
+> Build failed because of webpack errors

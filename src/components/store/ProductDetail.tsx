@@ -379,24 +379,49 @@ export function ProductDetail({ product }: { product: Product }) {
                     Download Now
                   </a>
                 ) : (
-                  <button
-                    onClick={handleAddToCart}
-                    disabled={isOutOfStock}
-                    className={`flex-1 flex items-center justify-center gap-2 px-8 py-4 rounded-full font-bold transition-all ${isOutOfStock
-                      ? 'bg-white/10 text-white/50 cursor-not-allowed'
-                      : 'bg-white text-black hover:bg-gray-200'
-                      }`}
-                  >
-                    <ShoppingCart size={20} />
-                    {isOutOfStock ? 'Out of Stock' : 'Add to Cart'}
-                  </button>
+                  <>
+                    <button
+                      onClick={handleAddToCart}
+                      disabled={isOutOfStock}
+                      className={`flex-1 flex items-center justify-center gap-2 px-8 py-4 rounded-full font-bold transition-all bg-white/10 text-white hover:bg-white/20`}
+                    >
+                      <ShoppingCart size={20} />
+                      {isOutOfStock ? 'Out of Stock' : 'Add to Cart'}
+                    </button>
+
+                    {!isOutOfStock && (
+                      <button
+                        onClick={async () => {
+                          if (!user?.email) {
+                            toast.error("Please sign in to buy now")
+                            return
+                          }
+                          toast.loading("Redirecting to checkout...")
+                          try {
+                            // Use Server Action for Secure Checkout
+                            const { createCheckout } = await import('@/actions/checkout')
+                            await createCheckout(product.id, user.email)
+                          } catch (e) {
+                            toast.error("Checkout failed")
+                            console.error(e)
+                          }
+                        }}
+                        className="flex-1 flex items-center justify-center gap-2 px-8 py-4 rounded-full font-bold transition-all bg-white text-black hover:bg-gray-200"
+                      >
+                        <Package size={20} />
+                        Buy Now
+                      </button>
+                    )}
+                  </>
                 )}
+              </div>
+              <div className="flex justify-center mt-4">
                 <button
                   onClick={handleShare}
-                  className="px-6 py-4 rounded-full border border-white/20 text-white font-semibold hover:bg-white/10 transition-all flex items-center justify-center gap-2"
+                  className="px-6 py-2 rounded-full border border-white/20 text-white/70 font-medium hover:bg-white/10 transition-all flex items-center justify-center gap-2 text-sm"
                 >
-                  <Share2 size={20} />
-                  Share
+                  <Share2 size={16} />
+                  Share Product
                 </button>
               </div>
             </div>

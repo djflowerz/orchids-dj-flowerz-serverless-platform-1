@@ -1,6 +1,6 @@
 {
     "functions": {
-        "source": "functions",
+        "source": "backend-functions",
         "codebase": "default",
         "ignore": [
             "node_modules",

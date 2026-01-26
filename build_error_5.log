@@ -1,0 +1,30 @@
+
+> app@0.1.0 build
+> next build
+
+   ▲ Next.js 15.4.0
+   - Environments: .env.local
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 20.0s
+   Skipping validation of types
+   Skipping linting
+   Collecting page data ...
+ ⚠ Using edge runtime on a page currently disables static generation for that page
+ReferenceError: url is not defined
+    at <unknown> (.next/server/app/payment-success/page.js:156)
+    at 57516 (.next/server/app/payment-success/page.js:156:11437)
+    at c (.next/server/edge-runtime-webpack.js:1:143)
+    at 44945 (.next/server/app/payment-success/page.js:134:9385)
+    at c (.next/server/edge-runtime-webpack.js:1:143)
+    at b (.next/server/app/payment-success/page.js:176:10300)
+    at <unknown> (.next/server/app/payment-success/page.js:176:10325)
+    at c.O (.next/server/edge-runtime-webpack.js:1:556)
+    at <unknown> (.next/server/app/payment-success/page.js:176:10343)
+    at b (.next/server/edge-runtime-webpack.js:1:1802)
+    at <unknown> (.next/server/app/payment-success/page.js:1:51)
+
+> Build error occurred
+[Error: Failed to collect page data for /payment-success] {
+  type: 'Error'
+}
