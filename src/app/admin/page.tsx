@@ -236,7 +236,17 @@ function AdminContent() {
   const searchParams = useSearchParams()
   const tabParam = searchParams.get('tab') as TabType | null
 
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
   const [activeTab, setActiveTab] = useState<TabType>(tabParam || 'dashboard')
+
+  // Prevent SSR for admin panel to avoid 500 errors
+  if (!mounted) return null
+
   const [stats, setStats] = useState<DashboardStats>({
     totalRevenue: 0,
     totalUsers: 0,

@@ -45,3 +45,15 @@ next-env.d.ts
 # security
 service-account.json
 
+
+# Backend Functions
+backend-functions/node_modules
+backend-functions/.env
+
+/src/generated/prisma
+
+# Local env files
+.env
+.env.local
+build.log
+service-account.json.bak

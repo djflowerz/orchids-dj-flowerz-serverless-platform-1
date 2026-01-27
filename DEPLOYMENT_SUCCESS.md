@@ -6,33 +6,19 @@
 Your site is deployed with **Paystack Live Keys**. Real payments will now be processed.
 
 ## 🌍 Live Site
-- **Production URL:** `https://djflowerz-site-7y1.pages.dev`
-- **Configured App URL:** `https://djflowerz-site.pages.dev` (Ensure this maps to your project in Cloudflare Dashboard)
+- **Production URL:** https://djflowerz-site.pages.dev
+- **Preview URL:** https://dd5abc2c.djflowerz-site.pages.dev (**Latest Build**)
+- **Dashboard:** https://dash.cloudflare.com/ca961f0eb41ca2bf77291b1769ca1c1d/pages/view/djflowerz
 
-## ☁️ Firebase Functions
-- **Project:** flowpay-401a4
-- **Webook URL:** `https://us-central1-flowpay-401a4.cloudfunctions.net/paystackWebhook`
+## 📂 Code Repository
+- **GitHub:** `https://github.com/djflowerz/orchids-dj-flowerz-serverless-platform-1`
+- **Status:** Synced with latest changes (including Paystack config).
 
-## 🛠 Deployment Configuration
+## ☁️ Backend
+- **Firebase Functions:** `flowpay-401a4` (Webhook Active)
+- **Secrets:** `PAYSTACK_SECRET_KEY` updated.
 
-### Frontend (Cloudflare Pages)
-- **Framework:** Next.js (via `@cloudflare/next-on-pages`)
-- **Runtime:** Edge Runtime for API Routes (`/api/*`), Static for Pages.
-- **Secrets:** `PAYSTACK_SECRET_KEY` (Uploaded to Cloudflare)
-- **Environment:** `NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY` (pk_live...) baked into build.
-
-### Backend (Firebase Functions)
-- **Runtime:** Node.js 20
-- **Location:** `backend-functions/`
-- **Secrets:** `PAYSTACK_SECRET_KEY` (Configured via `.env`)
-
-## ✅ Verification Steps
-1.  **Test Payment:** Run a real transaction with a small amount (e.g., KES 10) on the live site.
-2.  **Verify Webhook:** Ensure the transaction status updates in your Admin Dashboard/Firestore.
-
-## ⚠️ Important
-Ensure your Paystack Dashboard > Settings > API & Webhooks > **Live Webhook URL** is set to:
-`https://us-central1-flowpay-401a4.cloudfunctions.net/paystackWebhook`
-
-**Live Callback URL:**
-`https://djflowerz-site.pages.dev/payment-success` (or `https://djflowerz-site-7y1.pages.dev/payment-success` if using the direct pages URL)
+## ⚠️ Action Required
+Double check your Paystack Dashboard **Callback URL**.
+Use: `https://djflowerz-site.pages.dev/payment-success`
+(This matches the domain currently serving your site).

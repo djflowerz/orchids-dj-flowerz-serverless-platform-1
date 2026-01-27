@@ -1,28 +1,21 @@
-import { db } from '@/lib/firebase'
-import { collection, getDocs, query, orderBy, where } from 'firebase/firestore'
 import { Product } from '@/lib/types'
 import { ProductsList } from '@/components/store/ProductsList'
 
 async function getProducts(): Promise<Product[]> {
   try {
-    const productsRef = collection(db, 'products')
-    const q = query(productsRef, orderBy('created_at', 'desc'))
-    const snapshot = await getDocs(q)
+    // Fetch from our new API instead of Firebase
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+    const res = await fetch(`${baseUrl}/api/products`, {
+      next: { revalidate: 60 } // Revalidate every 60 seconds
+    })
 
-    return snapshot.docs
-      .filter(doc => {
-        const d = doc.data()
-        // Allow if status missing (legacy) or published
-        return !d.status || d.status === 'published'
-      })
-      .map(doc => {
-        const data = doc.data()
-        return {
-          id: doc.id,
-          ...data,
-          created_at: data.created_at?.toDate?.()?.toISOString() || data.created_at || new Date().toISOString()
-        } as Product
-      })
+    if (!res.ok) {
+      console.error('Failed to fetch products:', res.statusText)
+      return []
+    }
+
+    const products = await res.json()
+    return products
   } catch (error) {
     console.error('Error fetching products:', error)
     return []

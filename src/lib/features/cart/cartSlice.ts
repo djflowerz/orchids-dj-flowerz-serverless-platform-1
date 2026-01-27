@@ -1,0 +1,54 @@
+import { createSlice, PayloadAction } from '@reduxjs/toolkit'
+
+interface CartState {
+    total: number
+    cartItems: Record<string, number> // productId -> quantity
+}
+
+const initialState: CartState = {
+    total: 0,
+    cartItems: {},
+}
+
+const cartSlice = createSlice({
+    name: 'cart',
+    initialState,
+    reducers: {
+        addToCart: (state, action: PayloadAction<{ productId: string }>) => {
+            const { productId } = action.payload
+            if (state.cartItems[productId]) {
+                state.cartItems[productId]++
+            } else {
+                state.cartItems[productId] = 1
+            }
+            state.total += 1
+        },
+        removeFromCart: (state, action: PayloadAction<{ productId: string }>) => {
+            const { productId } = action.payload
+            if (state.cartItems[productId]) {
+                state.cartItems[productId]--
+                if (state.cartItems[productId] === 0) {
+                    delete state.cartItems[productId]
+                }
+                state.total -= 1
+            }
+        },
+        deleteItemFromCart: (state, action: PayloadAction<{ productId: string }>) => {
+            const { productId } = action.payload
+            state.total -= state.cartItems[productId] ? state.cartItems[productId] : 0
+            delete state.cartItems[productId]
+        },
+        clearCart: (state) => {
+            state.cartItems = {}
+            state.total = 0
+        },
+        setCart: (state, action: PayloadAction<Record<string, number>>) => {
+            state.cartItems = action.payload
+            state.total = Object.values(action.payload).reduce((sum, qty) => sum + qty, 0)
+        },
+    },
+})
+
+export const { addToCart, removeFromCart, clearCart, deleteItemFromCart, setCart } = cartSlice.actions
+
+export default cartSlice.reducer

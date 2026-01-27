@@ -5,8 +5,6 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { Headphones, Calendar, Music, ArrowRight, Play, Star, Users, Youtube, Mail, Download, Crown, Send, Shield, Zap, Check, ShoppingBag, TrendingUp, Sparkles, Award } from 'lucide-react'
 import { NewsletterForm } from '@/components/home/NewsletterForm'
-import { db } from '@/lib/firebase'
-import { collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore'
 import { Product } from '@/lib/types'
 
 export default function Home() {
@@ -16,32 +14,11 @@ export default function Home() {
   useEffect(() => {
     async function fetchProducts() {
       try {
-        // Fetch candidates for trending (recent published products)
-        // We fetch more than 4 to allow manual tags to bubble up from recent additions
-        const q = query(
-          collection(db, 'products'),
-          where('status', '==', 'published'),
-          orderBy('created_at', 'desc'),
-          limit(20)
-        )
-        const snapshot = await getDocs(q)
-        const products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product))
-
-        // Client-side sort to prioritize manual tags
-        const sorted = products.sort((a, b) => {
-          // 1. Trending tag (highest priority)
-          if ((b as any).is_trending !== (a as any).is_trending) {
-            return (b as any).is_trending ? 1 : -1
-          }
-          // 2. Hot tag
-          if ((b as any).is_hot !== (a as any).is_hot) {
-            return (b as any).is_hot ? 1 : -1
-          }
-          // 3. Downloads (popularity fallback)
-          return ((b.downloads || 0) - (a.downloads || 0))
-        })
-
-        setTrendingProducts(sorted.slice(0, 4))
+        const res = await fetch('/api/products?trending=true&limit=4')
+        if (res.ok) {
+          const data = await res.json()
+          setTrendingProducts(data)
+        }
       } catch (error) {
         console.error('Error fetching products:', error)
       } finally {

@@ -134,16 +134,23 @@ export async function POST(req: Request) {
         }
 
         // Update Status in Firestore
-        if (orderId) {
+        // Logic to determine Document ID and Collection
+        // In our checkout flow, we set reference = Firestore Document ID
+        const docId = orderId || reference
+        const meta = data.data.metadata || {}
+        const collectionName = collection || (meta.type === 'subscription' ? 'subscriptions' : 'orders')
+
+        // Update Status in Firestore
+        if (docId) {
             try {
-                await updateFirestoreOrder(collection, orderId, {
-                    status: collection === 'subscriptions' ? 'active' : 'paid', // Handle different status terms if needed
+                await updateFirestoreOrder(collectionName, docId, {
+                    status: collectionName === 'subscriptions' ? 'active' : 'paid',
                     payment_status: 'success',
                     payment_ref: reference,
                     payment_method: data.data.channel,
                     updated_at: new Date().toISOString()
                 })
-                console.log(`Document ${orderId} in ${collection} updated (via verify-payment)`)
+                console.log(`Document ${docId} in ${collectionName} updated (via verify-payment)`)
             } catch (dbError) {
                 console.error('Error updating document status:', dbError)
                 // Continue, as payment is verified

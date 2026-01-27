@@ -1,0 +1,213 @@
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model adapted for Better Auth + DJ Flowerz fields
+model User {
+  id            String    @id
+  name          String
+  email         String    @unique
+  emailVerified Boolean
+  image         String?
+  createdAt     DateTime
+  updatedAt     DateTime
+  role                    String    @default("user")
+  subscription_status     String    @default("none")
+  subscription_tier       String?
+  subscription_expires_at DateTime?
+  account_status          String    @default("active")
+  telegram_user_id        String?
+  telegram_username       String?
+  
+  sessions                Session[]
+  accounts      Account[]
+
+  // Custom fields
+  cart          Json      @default("{}")
+  Address       Address[]
+  buyerOrders   Order[]   @relation("BuyerRelation")
+  ratings       Rating[]
+  store         Store?
+}
+
+model Session {
+  id        String   @id
+  userId    String
+  token     String
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime
+  updatedAt DateTime
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Account {
+  id                    String    @id
+  userId                String
+  accountId             String
+  providerId            String
+  accessToken           String?
+  refreshToken          String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime
+  updatedAt             DateTime
+
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime
+  updatedAt  DateTime
+}
+
+model Product {
+  id          String      @id @default(cuid())
+  name        String
+  description String
+  mrp         Float
+  price       Float
+  images      String[]
+  category    String
+  inStock     Boolean     @default(true)
+  isTrending  Boolean     @default(false)
+  storeId     String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  orderItems  OrderItem[]
+  store       Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  rating      Rating[]
+}
+
+model Order {
+  id            String        @id @default(cuid())
+  total         Float
+  status        OrderStatus   @default(ORDER_PLACED)
+  userId        String
+  storeId       String
+  addressId     String
+  isPaid        Boolean       @default(false)
+  paymentMethod PaymentMethod
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  isCouponUsed  Boolean       @default(false)
+  coupon        Json          @default("{}")
+  address       Address       @relation(fields: [addressId], references: [id])
+  store         Store         @relation(fields: [storeId], references: [id])
+  user          User          @relation("BuyerRelation", fields: [userId], references: [id])
+  orderItems    OrderItem[]
+}
+
+model OrderItem {
+  orderId   String
+  productId String
+  quantity  Int
+  price     Float
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@id([orderId, productId])
+}
+
+model Rating {
+  id        String   @id @default(cuid())
+  rating    Int
+  review    String
+  userId    String
+  productId String
+  orderId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId, orderId])
+}
+
+model Address {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  email     String
+  street    String
+  city      String
+  state     String
+  zip       String
+  country   String
+  phone     String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Order     Order[]
+}
+
+model Coupon {
+  code        String   @id
+  description String
+  discount    Float
+  forNewUser  Boolean
+  forMember   Boolean  @default(false)
+  isPublic    Boolean
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+}
+
+model Store {
+  id          String    @id @default(cuid())
+  userId      String    @unique
+  name        String
+  description String
+  username    String    @unique
+  address     String
+  status      String    @default("pending")
+  isActive    Boolean   @default(false)
+  logo        String
+  email       String
+  contact     String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  Order       Order[]
+  Product     Product[]
+  user        User      @relation(fields: [userId], references: [id])
+}
+
+enum OrderStatus {
+  ORDER_PLACED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+}
+
+enum PaymentMethod {
+  COD
+  STRIPE
+  PAYSTACK
+}
+
+model YouTubeVideo {
+  id          String   @id @default(cuid())
+  title       String
+  videoId     String   // YouTube video ID
+  embedUrl    String   // Full embed URL
+  thumbnail   String?  // Thumbnail URL
+  description String?
+  isActive    Boolean  @default(true)
+  order       Int      @default(0) // Display order
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive, order])
+}
