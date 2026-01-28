@@ -73,5 +73,11 @@ service cloud.firestore {
     match /adminLogs/{logId} {
       allow read, write: if isAdmin();
     }
+
+    /* SETTINGS (Public Config) */
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
   }
 }
