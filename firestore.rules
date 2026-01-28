@@ -64,7 +64,7 @@ service cloud.firestore {
 
     /* TIP JAR */
     match /tips/{tipId} {
-      allow create: if isSignedIn();
+      allow create: if true;
       allow read: if isAdmin();
       allow update, delete: if false;
     }

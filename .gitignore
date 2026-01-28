@@ -57,3 +57,4 @@ backend-functions/.env
 .env.local
 build.log
 service-account.json.bak
+set-env-vars.sh
