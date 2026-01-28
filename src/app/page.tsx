@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { Headphones, Calendar, Music, ArrowRight, Play, Star, Users, Youtube, Mail, Download, Crown, Send, Shield, Zap, Check, ShoppingBag, TrendingUp, Sparkles, Award } from 'lucide-react'
 import { NewsletterForm } from '@/components/home/NewsletterForm'
 import { Product } from '@/lib/types'
+import { TechDealsGrid } from '@/components/store/TechDealsGrid'
 
 export default function Home() {
   const [trendingProducts, setTrendingProducts] = useState<Product[]>([])
@@ -149,89 +150,30 @@ export default function Home() {
         </div>
       </section>
 
-      {/* DJ Store Showcase Section - MOVED BEFORE "Who is this for" */}
-      <section className="py-24 px-6 bg-zinc-950">
+      {/* DJ Store Showcase Section */}
+      <section className="py-24 px-6 bg-gray-50">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-12">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 text-sm font-medium mb-6">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-purple-100 border border-purple-200 text-purple-700 text-sm font-medium mb-6">
               <ShoppingBag size={18} />
               <span>Computer Store</span>
             </div>
-            <h2 className="font-display text-4xl sm:text-6xl text-white mb-4">LAPTOPS & TECH</h2>
-            <p className="text-white/60 max-w-2xl mx-auto">
+            <h2 className="font-display text-4xl sm:text-6xl text-gray-900 mb-4">LAPTOPS & TECH</h2>
+            <p className="text-gray-600 max-w-2xl mx-auto">
               Shop our collection of high-performance Laptops, Desktops, Hard Drives, and tech accessories.
             </p>
           </div>
 
-          {/* Trending Products */}
-          <div className="mb-10">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
-                  <TrendingUp size={20} className="text-white" />
-                </div>
-                <h3 className="text-2xl font-bold text-white">Trending Now</h3>
-              </div>
-              <Link href="/store?sort=trending" className="text-violet-400 hover:text-violet-300 font-semibold flex items-center gap-2">
-                View All <ArrowRight size={16} />
-              </Link>
-            </div>
-
-            {loading ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                {[1, 2, 3, 4].map(i => (
-                  <div key={i} className="bg-white/5 rounded-2xl border border-white/10 p-4 animate-pulse">
-                    <div className="aspect-square bg-white/10 rounded-xl mb-4" />
-                    <div className="h-4 bg-white/10 rounded mb-2" />
-                    <div className="h-3 bg-white/10 rounded w-2/3" />
-                  </div>
-                ))}
-              </div>
-            ) : trendingProducts.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                {trendingProducts.map((product) => (
-                  <Link key={product.id} href={`/store/${product.id}`} className="group">
-                    <div className="bg-white/5 rounded-2xl border border-white/10 hover:border-violet-500/50 transition-all overflow-hidden">
-                      <div className="relative aspect-square overflow-hidden bg-white/5">
-                        <Image
-                          src={product.cover_images?.[0] || product.image_url || 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=500'}
-                          alt={product.title}
-                          fill
-                          className="object-cover group-hover:scale-110 transition-transform duration-500"
-                        />
-                        <div className="absolute top-3 right-3 px-2 py-1 rounded-full bg-orange-500 text-white text-xs font-bold flex items-center gap-1">
-                          <TrendingUp size={12} /> HOT
-                        </div>
-                      </div>
-                      <div className="p-4">
-                        <h4 className="text-white font-semibold mb-1 line-clamp-1 group-hover:text-violet-400 transition-colors">{product.title}</h4>
-                        <p className="text-white/50 text-sm mb-2">{product.category}</p>
-                        <div className="flex items-center justify-between">
-                          <span className="text-violet-400 font-bold">
-                            {product.is_free ? 'Free' : formatCurrency(product.price)}
-                          </span>
-                          {product.average_rating && product.average_rating > 0 && (
-                            <div className="flex items-center gap-1">
-                              <Star size={14} className="text-yellow-400 fill-yellow-400" />
-                              <span className="text-white/70 text-sm">{product.average_rating.toFixed(1)}</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-12 text-white/50">No trending products yet</div>
-            )}
+          {/* New Store UI Components */}
+          <div className="space-y-12">
+            <TechDealsGrid products={trendingProducts} loading={loading} />
           </div>
 
           {/* CTA */}
-          <div className="text-center">
+          <div className="text-center mt-12">
             <Link
               href="/store"
-              className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white rounded-full font-bold text-lg hover:opacity-90 transition-all"
+              className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white rounded-full font-bold text-lg hover:opacity-90 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1"
             >
               <ShoppingBag size={20} />
               Explore Full Store

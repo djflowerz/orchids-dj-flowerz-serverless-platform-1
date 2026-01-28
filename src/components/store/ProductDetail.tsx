@@ -368,50 +368,42 @@ export function ProductDetail({ product }: { product: Product }) {
                 </div>
               )}
 
-              <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex flex-col gap-4">
                 {canAccess ? (
                   <a
                     href={product.download_file_path || '#'}
                     download
-                    className="flex-1 flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-cyan-500 to-fuchsia-500 rounded-full text-white font-bold hover:opacity-90 transition-all"
+                    className="w-full flex items-center justify-center gap-3 px-8 py-5 bg-gradient-to-r from-cyan-500 to-fuchsia-500 rounded-2xl text-white font-bold text-lg hover:opacity-90 transition-all shadow-xl"
                   >
-                    <Download size={20} />
+                    <Download size={24} />
                     Download Now
                   </a>
                 ) : (
                   <>
+                    {/* LARGE WhatsApp Button - Primary CTA */}
+                    <a
+                      href={`https://wa.me/254789783258?text=${encodeURIComponent(
+                        `Hi, I want to buy ${quantity}x ${product.title}${Object.keys(selectedOptions).length > 0
+                          ? ` (${Object.entries(selectedOptions).map(([k, v]) => `${k}: ${v}`).join(', ')})`
+                          : ''
+                        }`
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full flex items-center justify-center gap-3 px-8 py-6 bg-gradient-to-r from-[#25D366] to-[#128C7E] rounded-2xl text-white font-bold text-xl hover:scale-[1.02] transition-all shadow-2xl shadow-green-500/30 border-2 border-green-400/20"
+                    >
+                      <MessageSquare size={28} className="animate-pulse" />
+                      <span>Buy Now on WhatsApp</span>
+                    </a>
+
+                    {/* Secondary: Add to Cart */}
                     <button
                       onClick={handleAddToCart}
-                      disabled={isOutOfStock}
-                      className={`flex-1 flex items-center justify-center gap-2 px-8 py-4 rounded-full font-bold transition-all bg-white/10 text-white hover:bg-white/20`}
+                      className="w-full flex items-center justify-center gap-2 px-8 py-4 bg-white/10 rounded-xl text-white font-semibold hover:bg-white/20 transition-all border border-white/10 hover:border-white/30"
                     >
                       <ShoppingCart size={20} />
-                      {isOutOfStock ? 'Out of Stock' : 'Add to Cart'}
+                      Add to Cart
                     </button>
-
-                    {!isOutOfStock && (
-                      <button
-                        onClick={async () => {
-                          if (!user?.email) {
-                            toast.error("Please sign in to buy now")
-                            return
-                          }
-                          toast.loading("Redirecting to checkout...")
-                          try {
-                            // Use Server Action for Secure Checkout
-                            const { createCheckout } = await import('@/actions/checkout')
-                            await createCheckout(product.id, user.email)
-                          } catch (e) {
-                            toast.error("Checkout failed")
-                            console.error(e)
-                          }
-                        }}
-                        className="flex-1 flex items-center justify-center gap-2 px-8 py-4 rounded-full font-bold transition-all bg-white text-black hover:bg-gray-200"
-                      >
-                        <Package size={20} />
-                        Buy Now
-                      </button>
-                    )}
                   </>
                 )}
               </div>

@@ -4,7 +4,7 @@ import { auth } from '@/lib/auth-server'
 
 export const runtime = 'edge'
 
-// GET /api/orders - Get user's orders
+// GET /api/orders - Get user's orders (or all for admin)
 export async function GET(request: Request) {
     try {
         const session = await auth.api.getSession({
@@ -15,10 +15,21 @@ export async function GET(request: Request) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
+        // Fetch user role from DB to be safe
+        const user = await prisma.user.findUnique({
+            where: { id: session.user.id },
+            select: { role: true, email: true }
+        })
+
+        const isAdmin = user?.role === 'admin' || user?.email === 'ianmuriithiflowerz@gmail.com'
+
         const { searchParams } = new URL(request.url)
         const status = searchParams.get('status')
+        const viewAll = searchParams.get('all') === 'true'
 
-        const where: any = { userId: session.user.id }
+        // If admin and ?all=true, show all orders. Otherwise show user's orders
+        const where: any = (isAdmin && viewAll) ? {} : { userId: session.user.id }
+
         if (status) {
             where.status = status
         }
@@ -37,7 +48,13 @@ export async function GET(request: Request) {
                         }
                     }
                 },
-                address: true
+                address: true,
+                user: { // Include user details for admin view
+                    select: {
+                        name: true,
+                        email: true
+                    }
+                }
             },
             orderBy: { createdAt: 'desc' }
         })
@@ -46,11 +63,14 @@ export async function GET(request: Request) {
         const mappedOrders = orders.map(order => ({
             id: order.id,
             user_id: order.userId,
+            user_name: order.user?.name || 'Unknown',
+            user_email: order.user?.email || 'Unknown',
             items: order.orderItems.map(item => ({
                 product_id: item.productId,
                 title: item.product.name,
                 quantity: item.quantity,
-                price: item.price
+                price: item.price,
+                image: item.product.images[0] || null
             })),
             total: order.total,
             status: order.status,
@@ -63,7 +83,6 @@ export async function GET(request: Request) {
                 country: order.address.country,
                 phone: order.address.phone
             } : null,
-            tracking_number: order.trackingNumber || null,
             created_at: order.createdAt.toISOString()
         }))
 
@@ -170,5 +189,48 @@ export async function POST(request: Request) {
     } catch (error) {
         console.error('Error creating order:', error)
         return NextResponse.json({ error: 'Failed to create order' }, { status: 500 })
+    }
+}
+
+export async function PUT(request: Request) {
+    try {
+        const session = await auth.api.getSession({
+            headers: request.headers
+        })
+
+        if (!session?.user) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Check admin
+        const currentUser = await prisma.user.findUnique({
+            where: { id: session.user.id },
+            select: { role: true, email: true }
+        })
+        const isAdmin = currentUser?.role === 'admin' || currentUser?.email === 'ianmuriithiflowerz@gmail.com'
+
+        if (!isAdmin) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        }
+
+        const body = await request.json()
+        const { id, status, shipping_status, courier_name } = body
+
+        if (!id) return NextResponse.json({ error: "Order ID required" }, { status: 400 })
+
+        const data: any = {}
+        if (status) data.status = status
+        if (shipping_status) data.shippingStatus = shipping_status
+        if (courier_name) data.courierName = courier_name
+
+        const order = await prisma.order.update({
+            where: { id },
+            data
+        })
+
+        return NextResponse.json(order)
+    } catch (error) {
+        console.error("Order Update Error", error)
+        return NextResponse.json({ error: "Failed to update order" }, { status: 500 })
     }
 }

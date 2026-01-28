@@ -1,25 +1,27 @@
-import { db } from '@/lib/firebase'
-import { collection, getDocs, query, orderBy, where } from 'firebase/firestore'
+import { prisma } from '@/lib/prisma'
 import { Mixtape } from '@/lib/types'
 import { MixtapesList } from '@/components/mixtapes/MixtapesList'
 
 async function getMixtapes(): Promise<Mixtape[]> {
   try {
-    const mixtapesRef = collection(db, 'mixtapes')
-    const q = query(mixtapesRef, orderBy('created_at', 'desc'))
-    const snapshot = await getDocs(q)
-
-    const allMixtapes = snapshot.docs.map(doc => {
-      const data = doc.data()
-      return {
-        id: doc.id,
-        ...data,
-        created_at: data.created_at?.toDate?.()?.toISOString() || data.created_at || new Date().toISOString()
-      } as Mixtape
+    const mixtapes = await prisma.mixtape.findMany({
+      where: { status: 'active' },
+      orderBy: { createdAt: 'desc' }
     })
 
-    // Filter by active status in memory to avoid index requirements
-    return allMixtapes.filter(m => m.status === 'active')
+    return mixtapes.map((m: typeof mixtapes[number]) => ({
+      id: m.id,
+      title: m.title,
+      description: m.description,
+      price: m.price,
+      cover_image: m.coverImage || '',
+      stream_url: m.audioUrl || '',
+      download_url: m.audioDownloadUrl || '',
+      category: m.genre,
+      downloads: m.plays,
+      status: m.status,
+      created_at: m.createdAt.toISOString()
+    }))
   } catch (error) {
     console.error('Error fetching mixtapes:', error)
     return []

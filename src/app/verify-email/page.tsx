@@ -1,97 +1,198 @@
-"use client"
+'use client';
 
-import { useEffect, useState, Suspense } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import { applyActionCode } from 'firebase/auth'
-import { auth } from '@/lib/firebase'
-import { toast } from 'sonner'
-import Link from 'next/link'
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { AuthLayout } from '@/components/auth/AuthLayout';
+import { OtpInput } from '@/components/auth/OtpInput';
+import { toast } from 'sonner';
+import { Mail, CheckCircle } from 'lucide-react';
 
 function VerifyEmailContent() {
-    const [status, setStatus] = useState<'verifying' | 'success' | 'error'>('verifying')
-    const [message, setMessage] = useState('Verifying your email...')
-    const router = useRouter()
-    const searchParams = useSearchParams()
-    const oobCode = searchParams.get('oobCode')
-    const mode = searchParams.get('mode') // 'verifyEmail'
+    const router = useRouter();
+    const searchParams = useSearchParams();
+    const email = searchParams.get('email');
+
+    const [otp, setOtp] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [resendLoading, setResendLoading] = useState(false);
+    const [resendCooldown, setResendCooldown] = useState(0);
+    const [verified, setVerified] = useState(false);
 
     useEffect(() => {
-        if (!oobCode) {
-            setStatus('error')
-            setMessage('Invalid verification link. No code found.')
-            return
+        if (!email) {
+            toast.error('Email not provided');
+            router.push('/signup');
         }
+    }, [email, router]);
 
-        const verify = async () => {
-            try {
-                await applyActionCode(auth, oobCode)
-                setStatus('success')
-                setMessage('Email verified successfully! Redirecting to login...')
-                toast.success('Email verified!')
+    useEffect(() => {
+        if (resendCooldown > 0) {
+            const timer = setTimeout(() => setResendCooldown(resendCooldown - 1), 1000);
+            return () => clearTimeout(timer);
+        }
+    }, [resendCooldown]);
 
-                // Redirect after 3 seconds
-                setTimeout(() => {
-                    router.push('/login')
-                }, 3000)
-            } catch (error: any) {
-                console.error('Verification error:', error)
-                setStatus('error')
-                if (error.code === 'auth/expired-action-code') {
-                    setMessage('The verification link has expired. Please sign in to request a new one.')
-                } else if (error.code === 'auth/invalid-action-code') {
-                    setMessage('The verification link is invalid. It may have already been used.')
-                } else {
-                    setMessage('Failed to verify email. Please try again.')
-                }
+    const handleVerify = async (otpValue: string) => {
+        if (!email) return;
+
+        setLoading(true);
+
+        try {
+            const response = await fetch('/api/auth/verify-otp', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, otp: otpValue }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                toast.error(data.error || 'Verification failed');
+                setOtp('');
+                setLoading(false);
+                return;
             }
-        }
 
-        verify()
-    }, [oobCode, router])
+            setVerified(true);
+            toast.success('Email verified successfully!');
+
+            // Redirect to login after 2 seconds
+            setTimeout(() => {
+                router.push('/login');
+            }, 2000);
+        } catch (error) {
+            console.error('Verification error:', error);
+            toast.error('An error occurred. Please try again.');
+            setOtp('');
+            setLoading(false);
+        }
+    };
+
+    const handleResend = async () => {
+        if (!email || resendCooldown > 0) return;
+
+        setResendLoading(true);
+
+        try {
+            const response = await fetch('/api/auth/send-otp', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                toast.error(data.error || 'Failed to resend OTP');
+                setResendLoading(false);
+                return;
+            }
+
+            toast.success('OTP sent! Check your email.');
+            setResendCooldown(60); // 60 seconds cooldown
+        } catch (error) {
+            console.error('Resend error:', error);
+            toast.error('Failed to resend OTP');
+        } finally {
+            setResendLoading(false);
+        }
+    };
+
+    if (verified) {
+        return (
+            <AuthLayout
+                title="Email Verified!"
+                subtitle="Your email has been successfully verified"
+            >
+                <div className="text-center py-8">
+                    <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-green-100 mb-6">
+                        <CheckCircle className="w-12 h-12 text-green-600" />
+                    </div>
+                    <p className="text-gray-600 mb-4">Redirecting you to login...</p>
+                    <div className="w-8 h-8 border-4 border-gray-200 border-t-black rounded-full animate-spin mx-auto" />
+                </div>
+            </AuthLayout>
+        );
+    }
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-black text-white p-4">
-            <div className="max-w-md w-full bg-zinc-900 border border-zinc-800 rounded-xl p-8 text-center space-y-6">
-                <h1 className="text-2xl font-bold">Email Verification</h1>
-
-                <div className={`text-lg ${status === 'verifying' ? 'text-zinc-400' :
-                        status === 'success' ? 'text-green-400' :
-                            'text-red-400'
-                    }`}>
-                    {message}
+        <AuthLayout
+            title="Verify Your Email"
+            subtitle={`We sent a code to ${email}`}
+        >
+            <div className="space-y-6">
+                <div className="text-center">
+                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-purple-100 mb-4">
+                        <Mail className="w-8 h-8 text-purple-600" />
+                    </div>
+                    <p className="text-gray-600 text-sm">
+                        Enter the 6-digit code we sent to your email
+                    </p>
                 </div>
 
-                {status === 'verifying' && (
-                    <div className="flex justify-center">
-                        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary-500"></div>
+                <div className="py-4">
+                    <OtpInput
+                        length={6}
+                        value={otp}
+                        onChange={setOtp}
+                        onComplete={handleVerify}
+                        disabled={loading}
+                    />
+                </div>
+
+                {loading && (
+                    <div className="text-center">
+                        <div className="inline-flex items-center gap-2 text-gray-600">
+                            <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                            <span className="text-sm">Verifying...</span>
+                        </div>
                     </div>
                 )}
 
-                {status === 'success' && (
-                    <div className="text-zinc-400 text-sm">
-                        <p>You will be redirected automatically.</p>
-                        <Link href="/login" className="text-primary-500 hover:text-primary-400 underline mt-2 inline-block">
-                            Click here if you are not redirected
-                        </Link>
-                    </div>
-                )}
+                <div className="text-center space-y-3">
+                    <p className="text-sm text-gray-600">
+                        Didn't receive the code?
+                    </p>
+                    <button
+                        type="button"
+                        onClick={handleResend}
+                        disabled={resendLoading || resendCooldown > 0}
+                        className="text-sm font-semibold text-black hover:text-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+                    >
+                        {resendLoading ? (
+                            'Sending...'
+                        ) : resendCooldown > 0 ? (
+                            `Resend in ${resendCooldown}s`
+                        ) : (
+                            'Resend Code'
+                        )}
+                    </button>
+                </div>
 
-                {status === 'error' && (
-                    <div className="pt-4">
-                        <Link href="/login" className="px-6 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors">
-                            Back to Login
-                        </Link>
-                    </div>
-                )}
+                <div className="pt-4 text-center">
+                    <button
+                        type="button"
+                        onClick={() => router.push('/signup')}
+                        className="text-sm text-gray-600 hover:text-black transition-colors"
+                    >
+                        ← Back to Sign Up
+                    </button>
+                </div>
             </div>
-        </div>
-    )
+        </AuthLayout>
+    );
 }
 
 export default function VerifyEmailPage() {
     return (
-        <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-black text-white">Loading...</div>}>
+        <Suspense fallback={
+            <AuthLayout title="Loading..." subtitle="Please wait">
+                <div className="text-center py-8">
+                    <div className="w-8 h-8 border-4 border-gray-200 border-t-black rounded-full animate-spin mx-auto" />
+                </div>
+            </AuthLayout>
+        }>
             <VerifyEmailContent />
         </Suspense>
-    )
+    );
 }

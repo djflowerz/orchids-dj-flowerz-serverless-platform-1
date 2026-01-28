@@ -4,14 +4,11 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Search, Download, Package, ShoppingCart, Star, Monitor, Apple, Smartphone, Filter, Check, TrendingUp, ChevronDown, ChevronRight, X, Calendar } from 'lucide-react'
+import { Search, Download, Package, ShoppingCart, Star, Monitor, Apple, Smartphone, Filter, Check, TrendingUp, ChevronDown, ChevronRight, X, Calendar, MessageSquare } from 'lucide-react'
 import { toast } from 'sonner'
 import { useCart } from '@/context/CartContext'
 import { Product } from '@/lib/types'
 import { formatCurrency } from '@/lib/utils'
-import { db } from '@/lib/firebase'
-import { collection, query, where, getDocs, onSnapshot } from 'firebase/firestore'
-
 const categories = ['All', 'Laptops', 'Desktops', 'Components', 'Accessories', 'Software', 'Samples', 'Apparel']
 const types = ['all', 'digital', 'physical']
 const osFilters = ['All', 'macOS', 'Windows', 'Android']
@@ -41,65 +38,21 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
   const { addToCart } = useCart()
 
   useEffect(() => {
-    // Real-time listener using a simple query, filtering in memory for flexibility
-    const q = query(
-      collection(db, 'products'),
-      where('status', '==', 'published')
-    )
-
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const liveProducts = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        created_at: (doc.data().created_at?.toDate?.() || new Date(doc.data().created_at || Date.now())).toISOString()
-      } as Product))
-
-      if (liveProducts.length === 0) {
-        setProducts([])
-        return
-      }
-
-      // Fetch Ratings
+    const fetchProducts = async () => {
       try {
-        const productIds = liveProducts.map(p => p.id)
-        // Simplification for reliability: fetch all reviews.
-        const allReviewsSnapshot = await getDocs(collection(db, 'product_reviews'))
-
-        const reviewsByProduct: Record<string, number[]> = {}
-        allReviewsSnapshot.docs.forEach(doc => {
-          const data = doc.data()
-          if (!reviewsByProduct[data.product_id]) {
-            reviewsByProduct[data.product_id] = []
-          }
-          reviewsByProduct[data.product_id].push(data.rating)
-        })
-
-        const productsWithRatings = liveProducts.map(product => {
-          const ratings = reviewsByProduct[product.id] || []
-          const average = ratings.length > 0
-            ? ratings.reduce((sum, r) => sum + r, 0) / ratings.length
-            : 0
-
-          // Simulate popularity/hot score
-          const popularity = (product.downloads || 0) + (ratings.length * 5)
-
-          return {
-            ...product,
-            average_rating: average,
-            review_count: ratings.length,
-            popularity_score: popularity
-          }
-        })
-
-        setProducts(productsWithRatings)
-
+        const res = await fetch('/api/products')
+        if (res.ok) {
+          const data = await res.json()
+          setProducts(data)
+        }
       } catch (error) {
-        console.error('Error fetching ratings in realtime listener:', error)
-        setProducts(liveProducts.map(p => ({ ...p, average_rating: 0, review_count: 0 })))
+        console.error('Error fetching products:', error)
       }
-    })
+    }
 
-    return () => unsubscribe()
+    fetchProducts()
+    const interval = setInterval(fetchProducts, 30000)
+    return () => clearInterval(interval)
   }, [])
 
   const filteredProducts = products.filter(p => {
@@ -287,8 +240,8 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
                 key={opt}
                 onClick={() => setSortBy(opt)}
                 className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all flex items-center gap-2 ${sortBy === opt
-                    ? 'bg-white/10 text-white shadow-sm'
-                    : 'text-white/50 hover:text-white hover:bg-white/5'
+                  ? 'bg-white/10 text-white shadow-sm'
+                  : 'text-white/50 hover:text-white hover:bg-white/5'
                   }`}
               >
                 {opt === 'Hot' ? <TrendingUp size={14} className={sortBy === 'Hot' ? 'text-orange-500' : ''} /> : null}
@@ -440,12 +393,26 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
                         </span>
 
                         {(product.is_paid || (product.price || 0) > 0) && !product.is_free && (
-                          <button
-                            onClick={(e) => handleQuickAdd(e, product)}
-                            className="w-8 h-8 rounded-full bg-cyan-500/10 border border-cyan-500/50 text-cyan-400 hover:bg-cyan-500 hover:text-white transition-all flex items-center justify-center"
-                          >
-                            <ShoppingCart size={14} />
-                          </button>
+                          <div className="flex gap-2">
+                            <a
+                              href={`https://wa.me/254789783258?text=${encodeURIComponent(`Hi, I want to buy ${product.title}`)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex-1 px-3 py-2 rounded-lg bg-gradient-to-r from-[#25D366] to-[#128C7E] text-white font-semibold hover:scale-105 transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-green-500/20"
+                              title="Buy on WhatsApp"
+                            >
+                              <MessageSquare size={16} />
+                              <span className="text-xs">WhatsApp</span>
+                            </a>
+                            <button
+                              onClick={(e) => handleQuickAdd(e, product)}
+                              className="w-9 h-9 rounded-lg bg-white/10 hover:bg-cyan-500/20 text-white/70 hover:text-cyan-400 border border-white/10 hover:border-cyan-500/30 transition-all flex items-center justify-center"
+                              title="Add to Cart"
+                            >
+                              <ShoppingCart size={16} />
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>

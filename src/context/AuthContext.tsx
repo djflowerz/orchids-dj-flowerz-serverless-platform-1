@@ -20,7 +20,7 @@ interface User {
 
 interface AuthContextType {
   user: User | null
-  loading: boolean
+  isLoading: boolean
   signIn: (email: string, password: string) => Promise<{ error: string | null; redirectTo?: string }>
   signUp: (email: string, password: string, name: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
@@ -32,45 +32,32 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
   const router = useRouter()
 
-  // Use Better Auth hook
+  // Use Better Auth hook directly
   const { data: sessionData, isPending, error } = authClient.useSession()
 
-  useEffect(() => {
-    if (!isPending) {
-      if (sessionData?.user) {
-        // Map session user to our User interface
-        // Note: Better Auth session user might not have all fields if not configured in adapter
-        // But we can fetch profile if needed.
-        // For now, use what's in session + default role
-        const u = sessionData.user
-        setUser({
-          id: u.id,
-          name: u.name,
-          email: u.email,
-          image: u.image || null,
-          role: (u as any).role || 'user', // Need role in session!
-          emailVerified: u.emailVerified,
-          createdAt: u.createdAt,
-          subscription_status: (u as any).subscription_status || 'none'
-        })
-      } else {
-        setUser(null)
-      }
-      setLoading(false)
-    }
-  }, [sessionData, isPending])
+  // Derived state from session
+  const user = sessionData?.user ? {
+    id: sessionData.user.id,
+    name: sessionData.user.name,
+    email: sessionData.user.email,
+    image: sessionData.user.image || null,
+    role: (sessionData.user as any).role || 'user',
+    emailVerified: sessionData.user.emailVerified,
+    createdAt: sessionData.user.createdAt,
+    subscription_status: (sessionData.user as any).subscription_status || 'none',
+    subscription_tier: (sessionData.user as any).subscription_tier
+  } as User : null
+
+  const isLoading = isPending
 
   async function handleSignIn(email: string, password: string) {
     try {
-      setLoading(true)
       const res = await signIn.email({
         email,
         password,
-        callbackURL: '/' // Redirect handled by client or manual
+        callbackURL: '/'
       }, {
         onSuccess: () => {
           toast.success('Signed in successfully')
@@ -80,30 +67,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           toast.error(ctx.error.message)
         }
       })
-      // If error, better-auth throws or proper handling?
-      if (res.error) {
-        return { error: res.error.message }
-      }
+      if (res.error) return { error: res.error.message }
       return { error: null }
-
     } catch (err: any) {
       return { error: err.message || 'Login failed' }
-    } finally {
-      setLoading(false)
     }
   }
 
   async function handleSignUp(email: string, password: string, name: string) {
     try {
-      setLoading(true)
       const res = await signUp.email({
         email,
         password,
         name,
-        callbackURL: '/login'
+        callbackURL: '/login' // We hijack this flow below
       }, {
-        onSuccess: () => {
-          toast.success('Account created! Please verify your email.')
+        onSuccess: async () => {
+          // Immediately trigger OTP send
+          try {
+            await fetch('/api/auth/send-otp', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email }),
+            });
+            toast.success('Account created! Code sent.');
+            router.push(`/verify-email?email=${encodeURIComponent(email)}`)
+          } catch (e) {
+            console.error("Failed to send initial OTP", e)
+            toast.error('Account created, but failed to send OTP. Please login and request new code.')
+            router.push('/login')
+          }
         },
         onError: (ctx) => {
           toast.error(ctx.error.message)
@@ -113,8 +106,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { error: null }
     } catch (err: any) {
       return { error: err.message || 'Signup failed' }
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -122,7 +113,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await signOut({
       fetchOptions: {
         onSuccess: () => {
-          setUser(null)
           router.push('/login')
           toast.success('Signed out')
         }
@@ -131,16 +121,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signInWithGoogle() {
-    // Check if configured? Assume yes via Neon Service
     const res = await signIn.social({
       provider: 'google',
       callbackURL: '/'
     })
-    if (res.error) return { error: res.error.message }
+    if (res.error) return { error: res.error.message || 'Unknown error' }
     return { error: null }
   }
 
-  // Tier logic (simplified for now, assumes role/status is in user object)
+  // Tier logic
   const tierHierarchy: Record<string, number> = {
     'free': 0,
     'basic': 1,
@@ -151,10 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   function checkTierAccess(requiredTier: string): boolean {
     if (!user) return requiredTier === 'free'
     if (user.role === 'admin') return true
-
-    // Check Status
     if (user.subscription_status !== 'active') return requiredTier === 'free'
-
     const userTierLevel = tierHierarchy[user.subscription_tier || 'free'] || 0
     const requiredLevel = tierHierarchy[requiredTier] || 0
     return userTierLevel >= requiredLevel
@@ -165,11 +151,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider value={{
       user,
-      loading,
+      isLoading,
       signIn: handleSignIn,
       signUp: handleSignUp,
       signOut: handleSignOut,
-      signInWithGoogle, // Implement others as needed
+      signInWithGoogle,
       isAdmin,
       checkTierAccess
     }}>
@@ -177,6 +163,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     </AuthContext.Provider>
   )
 }
+
 
 export function useAuth() {
   const context = useContext(AuthContext)

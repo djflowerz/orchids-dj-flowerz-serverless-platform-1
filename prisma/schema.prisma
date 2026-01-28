@@ -13,7 +13,7 @@ model User {
   id            String    @id
   name          String
   email         String    @unique
-  emailVerified Boolean
+  emailVerified Boolean   @default(false)
   image         String?
   createdAt     DateTime
   updatedAt     DateTime
@@ -25,6 +25,10 @@ model User {
   telegram_user_id        String?
   telegram_username       String?
   
+  // Email OTP verification
+  emailVerificationOtp    String?
+  otpExpiresAt            DateTime?
+  
   sessions                Session[]
   accounts      Account[]
 
@@ -34,6 +38,9 @@ model User {
   buyerOrders   Order[]   @relation("BuyerRelation")
   ratings       Rating[]
   store         Store?
+  recordingBookings RecordingBooking[]
+  transactions      Transaction[]
+  subscriptions     Subscription[]
 }
 
 model Session {
@@ -83,7 +90,7 @@ model Product {
   price       Float
   images      String[]
   category    String
-  inStock     Boolean     @default(true)
+  inStock     Int         @default(0)
   isTrending  Boolean     @default(false)
   storeId     String
   createdAt   DateTime    @default(now())
@@ -104,12 +111,15 @@ model Order {
   paymentMethod PaymentMethod
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
+  shippingStatus String       @default("pending")
+  courierName   String?
   isCouponUsed  Boolean       @default(false)
   coupon        Json          @default("{}")
   address       Address       @relation(fields: [addressId], references: [id])
   store         Store         @relation(fields: [storeId], references: [id])
   user          User          @relation("BuyerRelation", fields: [userId], references: [id])
   orderItems    OrderItem[]
+  transactions  Transaction[]
 }
 
 model OrderItem {
@@ -210,4 +220,207 @@ model YouTubeVideo {
   updatedAt   DateTime @updatedAt
 
   @@index([isActive, order])
+}
+
+model RecordingSession {
+  id                String             @id @default(cuid())
+  name              String
+  description       String
+  locationType      LocationType
+  basePrice         Float              // Base price in KES
+  hourlyRate        Float?             // Optional hourly rate
+  duration          Int?               // Duration in minutes (if fixed)
+  equipmentTier     EquipmentTier
+  includesEditing   Boolean            @default(false)
+  includesMastering Boolean            @default(false)
+  maxParticipants   Int                @default(1)
+  isActive          Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  
+  bookings          RecordingBooking[]
+}
+
+model RecordingBooking {
+  id               String           @id @default(cuid())
+  userId           String
+  sessionId        String
+  scheduledDate    DateTime
+  scheduledTime    String           // e.g., "14:00"
+  duration         Int              // in minutes
+  location         String?          // For ON_LOCATION bookings
+  equipmentNeeds   String?          // JSON string for custom equipment
+  totalPrice       Float
+  status           BookingStatus    @default(PENDING)
+  isPaid           Boolean          @default(false)
+  paymentMethod    String?          // "MPESA", "CARD", etc.
+  paymentReference String?          // M-Pesa transaction ID
+  notes            String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session          RecordingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  transactions     Transaction[]
+  
+  @@index([userId, status])
+  @@index([scheduledDate])
+}
+
+enum LocationType {
+  IN_STUDIO
+  ON_LOCATION
+  REMOTE
+}
+
+enum EquipmentTier {
+  BASIC
+  STANDARD
+  PREMIUM
+  CUSTOM
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model Transaction {
+  id              String   @id @default(cuid())
+  reference       String   @unique
+  type            String   // 'booking', 'order', 'subscription', 'tip'
+  status          String   // 'success', 'failed', 'pending'
+  amount          Float
+  currency        String   @default("KES")
+  email           String
+  userId          String?
+  metadata        Json?
+  paymentMethod   String   @default("PAYSTACK")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  bookingId       String?
+  booking         RecordingBooking? @relation(fields: [bookingId], references: [id])
+  
+  orderId         String?
+  order           Order?            @relation(fields: [orderId], references: [id])
+  
+  user            User?             @relation(fields: [userId], references: [id])
+
+  @@index([reference])
+  @@index([email])
+}
+
+model Mixtape {
+  id                  String   @id @default(cuid())
+  title               String
+  description         String
+  coverImage          String?
+  mixLink             String?
+  audioUrl            String?
+  videoUrl            String?
+  genre               String
+  price               Float    @default(0)
+  isFree              Boolean  @default(true)
+  plays               Int      @default(0)
+  status              String   @default("active") // 'active' | 'inactive'
+  audioDownloadUrl    String?
+  videoDownloadUrl    String?
+  embedUrl            String?
+  isHot               Boolean  @default(false)
+  isNewArrival        Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([status])
+  @@index([genre])
+}
+
+model MusicPoolTrack {
+  id          String   @id @default(cuid())
+  title       String
+  artist      String
+  genre       String
+  bpm         Int
+  trackLink   String
+  coverImage  String
+  tier        String   // 'basic' | 'pro' | 'unlimited'
+  downloads   Int      @default(0)
+  musicKey    String?
+  version     String?
+  isActive    Boolean  @default(true)
+  releaseDate DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tier])
+  @@index([genre])
+}
+
+model Plan {
+  id            String   @id @default(cuid())
+  name          String
+  price         Float
+  durationDays  Int
+  channels      String[] // Array of channel IDs
+  isActive      Boolean  @default(true)
+  description   String?
+  features      String[] // Array of feature descriptions
+  tier          String?  // 'basic' | 'pro' | 'unlimited'
+  duration      String?  // Human-readable duration
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tier])
+}
+
+model Subscription {
+  id              String   @id @default(cuid())
+  userId          String
+  userEmail       String
+  tier            String
+  status          String   @default("active")
+  startDate       DateTime @default(now())
+  endDate         DateTime
+  telegramChannels String[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  user            User     @relation(fields: [userId], references: [id])
+
+  @@index([status])
+  @@index([userId])
+}
+
+model EventBooking {
+  id            String   @id @default(cuid())
+  customerName  String
+  email         String
+  phone         String
+  eventType     String
+  eventDate     DateTime
+  eventTime     String
+  location      String
+  status        String   @default("pending")
+  amount        Float
+  notes         String?
+  assignedDj    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model SiteSettings {
+  id                  String   @id @default("site")
+  maintenanceMode     Boolean  @default(false)
+  paystackPublicKey   String?
+  paystackSecretKey   String?
+  mpesaConsumerKey    String?
+  mpesaConsumerSecret String?
+  telegramBotToken    String?
+  telegramChannels    Json?    // Array of { id, name, inviteLink }
+  autoSyncEnabled     Boolean  @default(true)
+  updatedAt           DateTime @updatedAt
 }

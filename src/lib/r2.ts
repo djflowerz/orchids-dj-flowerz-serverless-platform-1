@@ -19,6 +19,16 @@ export async function generateSignedDownload(key: string) {
     return getSignedUrl(r2, command, { expiresIn: 300 }); // 5 minutes
 }
 
+export async function generateSignedUpload(key: string, contentType: string) {
+    const command = new PutObjectCommand({
+        Bucket: "music-packs", // Ensure this matches your bucket name
+        Key: key,
+        ContentType: contentType
+    });
+
+    return getSignedUrl(r2, command, { expiresIn: 600 }); // 10 minutes
+}
+
 export async function uploadToR2(file: Buffer, key: string, contentType: string) {
     const command = new PutObjectCommand({
         Bucket: "music-packs",

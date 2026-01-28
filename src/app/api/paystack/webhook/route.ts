@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { updateDocumentOnEdge, createTransactionOnEdge } from '@/lib/firestore-edge'
+import { prisma } from '@/lib/prisma'
 import { getRequestContext } from '@cloudflare/next-on-pages'
 
 export const runtime = 'edge'
@@ -46,65 +46,110 @@ async function processEvent(eventData: any) {
             const metadata = eventData.data.metadata || {}
             const type = metadata.type || 'product'
 
-            if (type === 'subscription') {
-                await updateDocumentOnEdge('subscriptions', reference, {
-                    status: 'active',
-                    payment_status: 'paid',
-                    transaction_id: id?.toString() || '',
-                    paid_at: new Date(),
-                    amount: amount || 0,
-                    updated_at: new Date()
-                })
-
-                // CRITICAL: Update User Status to grant access
-                const userId = metadata.user_id
-                if (userId) {
-                    await updateDocumentOnEdge('users', userId, {
-                        subscription_status: 'active',
-                        subscription_tier: 'unlimited', // Default to unlimited for now, or match plan logic
-                        subscription_expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // Default 30 days
-                        updated_at: new Date()
-                    })
-                    console.log(`[Paystack Webhook] ✅ User ${userId} subscription activated`)
-                } else {
-                    console.warn(`[Paystack Webhook] ⚠️ Subscription paid but no user_id found in metadata`)
-                }
-
-                console.log(`[Paystack Webhook] ✅ Subscription ${reference} ACTIVATED`)
-            } else {
-                await updateDocumentOnEdge('orders', reference, {
-                    status: 'paid',
-                    payment_status: 'success',
-                    transaction_id: id?.toString() || '',
-                    paid_at: new Date(),
-                    verified_amount: amount || 0,
-                    customer_email: customer?.email || '',
-                    updated_at: new Date()
-                })
-                console.log(`[Paystack Webhook] ✅ Order ${reference} marked as PAID`)
+            // Data for transaction record
+            const transactionData = {
+                reference: reference,
+                type: type,
+                status: 'success', // Paystack charge.success means success
+                amount: amount || 0,
+                email: customer?.email || '',
+                metadata: metadata,
+                paymentMethod: 'PAYSTACK'
             }
 
-            // Create transaction record
-            await createTransactionOnEdge({
-                order_id: reference,
-                user_email: customer?.email || '',
-                amount: amount || 0,
-                type: type,
-                status: 'completed',
-                reference: reference,
-                transaction_id: id?.toString() || '',
-                payment_method: 'paystack',
-                created_at: new Date()
-            })
+            if (type === 'booking') {
+                const bookingId = metadata.booking_id
 
-            console.log(`[Paystack Webhook] ✅ Transaction record created for ${reference}`)
+                await prisma.recordingBooking.update({
+                    where: { id: bookingId },
+                    data: {
+                        isPaid: true,
+                        status: 'CONFIRMED',
+                        paymentReference: reference
+                    }
+                })
+
+                // Create Transaction linked to Booking
+                await prisma.transaction.create({
+                    data: {
+                        ...transactionData,
+                        bookingId: bookingId,
+                        ...(metadata.user_id ? { userId: metadata.user_id } : {})
+                    }
+                })
+
+                console.log(`[Paystack Webhook] ✅ Booking ${bookingId} CONFIRMED & Transaction Saved`)
+
+            } else if (type === 'subscription') {
+                const userId = metadata.user_id
+
+                if (userId) {
+                    await prisma.user.update({
+                        where: { id: userId },
+                        data: {
+                            subscription_status: 'active',
+                            subscription_tier: 'unlimited',
+                            subscription_expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+                            updatedAt: new Date()
+                        }
+                    })
+
+                    // Create Transaction linked to User
+                    await prisma.transaction.create({
+                        data: {
+                            ...transactionData,
+                            userId: userId
+                        }
+                    })
+
+                    console.log(`[Paystack Webhook] ✅ User ${userId} subscription activated & Transaction Saved`)
+                } else {
+                    console.warn(`[Paystack Webhook] ⚠️ Subscription paid but no user_id found in metadata`)
+                    // Create unlinked transaction
+                    await prisma.transaction.create({
+                        data: transactionData
+                    })
+                }
+
+            } else {
+                // Product Order
+                const orderId = metadata.order_id || reference
+
+                try {
+                    await prisma.order.update({
+                        where: { id: orderId },
+                        data: {
+                            status: 'PROCESSING',
+                            isPaid: true,
+                            paymentMethod: 'PAYSTACK'
+                        }
+                    })
+                    console.log(`[Paystack Webhook] ✅ Order ${orderId} marked as PAID`)
+
+                    // Create Transaction linked to Order
+                    await prisma.transaction.create({
+                        data: {
+                            ...transactionData,
+                            orderId: orderId,
+                            ...(metadata.user_id ? { userId: metadata.user_id } : {})
+                        }
+                    })
+
+                } catch (orderError) {
+                    console.error(`[Paystack Webhook] Failed to update order ${orderId}:`, orderError)
+                    // Fallback: Just save transaction
+                    await prisma.transaction.create({
+                        data: transactionData
+                    })
+                }
+            }
 
         } catch (err) {
             console.error('[Paystack Webhook] Error updating records:', err)
-            // In a real production app, you might want to log this to an external error tracking service
         }
     }
 }
+
 
 export async function POST(req: Request) {
     try {

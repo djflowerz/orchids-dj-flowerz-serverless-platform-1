@@ -26,6 +26,7 @@ export function Navbar() {
     { href: '/music-pool', label: 'Music Pool', icon: Crown },
     { href: '/pricing', label: 'Pricing', icon: Crown },
     { href: '/store', label: 'Store', icon: Store },
+    { href: '/recording-sessions', label: 'Recording', icon: Headphones },
     { href: '/bookings', label: 'Bookings', icon: Calendar },
     { href: '/tip-jar', label: 'Tip Jar', icon: Heart, isButton: true },
     { href: '/contact', label: 'Contact', icon: MessageCircle },
@@ -114,6 +115,13 @@ export function Navbar() {
                 >
                   <User size={20} />
                 </Link>
+                <Link
+                  href="/my-recordings"
+                  className="p-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-all"
+                  title="My Recordings"
+                >
+                  <Music size={20} />
+                </Link>
                 <button
                   onClick={signOut}
                   className="px-4 py-2 rounded-full text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 transition-all"
@@ -166,6 +174,14 @@ export function Navbar() {
                 >
                   <User size={18} />
                   My Dashboard
+                </Link>
+                <Link
+                  href="/my-recordings"
+                  onClick={() => setMobileOpen(false)}
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 transition-all"
+                >
+                  <Music size={18} />
+                  My Recordings
                 </Link>
                 <Link
                   href="/dashboard?tab=notifications"
