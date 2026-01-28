@@ -22,22 +22,38 @@ const createPrismaClient = () => {
         })
     }
 
-    // 2. Node.js Environment Detection (Build time or Local Prod)
-    // Cloudflare Pages Build runs in Node.js. We should use Standard Client there to avoid WS issues.
-    // Edge Runtime does not have process.versions.node
+    // 2. Node.js Environment Detection (Vercel, Build time, or Local Prod)
+    // Vercel and most production environments use Node.js runtime
     const isNode = typeof process !== 'undefined' && process.versions && process.versions.node
 
-    if (isNode) {
+    if (isNode && process.env.NEXT_RUNTIME !== 'edge') {
         console.log('Initialize Prisma Client - Node.js Environment (Standard Driver)')
         return new PrismaClient({
             log: ['query'],
         })
     }
 
-    // 3. Edge / Production Mode (Neon Adapter)
-    if (typeof WebSocket !== 'undefined') {
+    // 3. Edge Runtime Detection (Cloudflare Pages specific)
+    if (process.env.NEXT_RUNTIME === 'edge') {
         console.log('Initialize Prisma Client - Edge Mode (Neon Adapter)')
-        neonConfig.webSocketConstructor = WebSocket
+        if (typeof WebSocket !== 'undefined') {
+            neonConfig.webSocketConstructor = WebSocket
+        }
+        neonConfig.poolQueryViaFetch = true
+
+        const pool = new Pool({ connectionString })
+        const adapter = new PrismaNeon(pool)
+
+        return new PrismaClient({
+            adapter,
+            log: ['query'],
+        })
+    }
+
+    // 4. Fallback (e.g. Browser or unexpected runtime)
+    if (typeof WebSocket !== 'undefined') {
+
+
         neonConfig.poolQueryViaFetch = true
 
         const pool = new Pool({ connectionString })

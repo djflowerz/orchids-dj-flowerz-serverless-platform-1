@@ -1,5 +1,3 @@
-import bcrypt from 'bcryptjs';
-
 /**
  * Generate a 6-digit OTP code
  */
@@ -8,18 +6,22 @@ export function generateOTP(): string {
 }
 
 /**
- * Hash an OTP for secure storage
+ * Hash an OTP for secure storage using SHA-256
  */
 export async function hashOTP(otp: string): Promise<string> {
-    const salt = await bcrypt.genSalt(10);
-    return bcrypt.hash(otp, salt);
+    const encoder = new TextEncoder();
+    const data = encoder.encode(otp);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 /**
  * Verify an OTP against its hash
  */
 export async function verifyOTP(otp: string, hash: string): Promise<boolean> {
-    return bcrypt.compare(otp, hash);
+    const computed = await hashOTP(otp);
+    return computed === hash;
 }
 
 /**

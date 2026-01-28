@@ -4,7 +4,7 @@
     "private": true,
     "scripts": {
         "dev": "next dev --turbopack",
-        "build": "next build",
+        "build": "prisma generate && next build",
         "pages:build": "npx prisma generate && npx @cloudflare/next-on-pages",
         "start": "next start",
         "lint": "next lint"
@@ -57,6 +57,7 @@
         "@tsparticles/engine": "^3.8.1",
         "@tsparticles/react": "^3.0.0",
         "@tsparticles/slim": "^3.8.1",
+        "appwrite": "^21.5.0",
         "assert": "^2.1.0",
         "atmn": "^0.0.28",
         "autumn-js": "^0.1.43",
@@ -90,6 +91,7 @@
         "next": "15.4.0",
         "next-firebase-auth-edge": "^1.11.1",
         "next-themes": "^0.4.6",
+        "node-appwrite": "^21.1.0",
         "node-telegram-bot-api": "^0.67.0",
         "orchids-visual-edits": "^1.0.13",
         "os-browserify": "^0.3.0",

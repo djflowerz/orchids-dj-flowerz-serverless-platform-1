@@ -2,8 +2,9 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import { authClient, signIn, signOut, signUp } from '@/lib/auth-client'
-import { toast } from 'react-hot-toast'
+import { account, client } from '@/lib/appwrite'
+import { ID, Models, OAuthProvider } from 'appwrite'
+import { toast } from 'sonner' // switched to sonner based on login page usage
 
 interface User {
   id: string
@@ -12,8 +13,7 @@ interface User {
   image: string | null
   role: string | null
   emailVerified: boolean
-  createdAt: Date
-  // Custom fields might need to be fetched separately if not in session object
+  createdAt: string
   subscription_status?: string
   subscription_tier?: string
 }
@@ -33,42 +33,52 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter()
+  const [user, setUser] = useState<User | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
 
-  // Use Better Auth hook directly
-  const { data: sessionData, isPending, error } = authClient.useSession()
+  useEffect(() => {
+    checkUser()
+  }, [])
 
-  // Derived state from session
-  const user = sessionData?.user ? {
-    id: sessionData.user.id,
-    name: sessionData.user.name,
-    email: sessionData.user.email,
-    image: sessionData.user.image || null,
-    role: (sessionData.user as any).role || 'user',
-    emailVerified: sessionData.user.emailVerified,
-    createdAt: sessionData.user.createdAt,
-    subscription_status: (sessionData.user as any).subscription_status || 'none',
-    subscription_tier: (sessionData.user as any).subscription_tier
-  } as User : null
+  async function checkUser() {
+    try {
+      const accountData = await account.get()
+      setUser(mapAppwriteUser(accountData))
+    } catch (error) {
+      setUser(null)
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
-  const isLoading = isPending
+  function mapAppwriteUser(accountData: Models.User<Models.Preferences>): User {
+    const prefs = accountData.prefs as any;
+    return {
+      id: accountData.$id,
+      name: accountData.name,
+      email: accountData.email,
+      image: null, // Appwrite doesn't store user avatar URL in basic account object
+      role: prefs?.role || 'user',
+      emailVerified: accountData.emailVerification,
+      createdAt: accountData.$createdAt,
+      subscription_status: prefs?.subscription_status || 'none',
+      subscription_tier: prefs?.subscription_tier
+    }
+  }
 
   async function handleSignIn(email: string, password: string) {
     try {
-      const res = await signIn.email({
-        email,
-        password,
-        callbackURL: '/'
-      }, {
-        onSuccess: () => {
-          toast.success('Signed in successfully')
-          router.push('/')
-        },
-        onError: (ctx) => {
-          toast.error(ctx.error.message)
-        }
-      })
-      if (res.error) return { error: res.error.message }
-      return { error: null }
+      // Delete existing session if any to avoid 401/409
+      try {
+        await account.deleteSession('current')
+      } catch { }
+
+      await account.createEmailPasswordSession(email, password)
+      const user = await account.get()
+      setUser(mapAppwriteUser(user))
+
+      toast.success('Signed in successfully')
+      return { error: null, redirectTo: '/' }
     } catch (err: any) {
       return { error: err.message || 'Login failed' }
     }
@@ -76,33 +86,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function handleSignUp(email: string, password: string, name: string) {
     try {
-      const res = await signUp.email({
-        email,
-        password,
-        name,
-        callbackURL: '/login' // We hijack this flow below
-      }, {
-        onSuccess: async () => {
-          // Immediately trigger OTP send
-          try {
-            await fetch('/api/auth/send-otp', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email }),
-            });
-            toast.success('Account created! Code sent.');
-            router.push(`/verify-email?email=${encodeURIComponent(email)}`)
-          } catch (e) {
-            console.error("Failed to send initial OTP", e)
-            toast.error('Account created, but failed to send OTP. Please login and request new code.')
-            router.push('/login')
-          }
-        },
-        onError: (ctx) => {
-          toast.error(ctx.error.message)
-        }
-      })
-      if (res.error) return { error: res.error.message }
+      await account.create(ID.unique(), email, password, name)
+      // Auto login after signup
+      await handleSignIn(email, password)
+      // Optionally trigger verification
+      // await account.createVerification('http://localhost:3000/verify-email');
+
       return { error: null }
     } catch (err: any) {
       return { error: err.message || 'Signup failed' }
@@ -110,23 +99,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function handleSignOut() {
-    await signOut({
-      fetchOptions: {
-        onSuccess: () => {
-          router.push('/login')
-          toast.success('Signed out')
-        }
-      }
-    })
+    try {
+      await account.deleteSession('current')
+      setUser(null)
+      router.push('/login')
+      toast.success('Signed out')
+    } catch (err) {
+      console.error(err)
+    }
   }
 
   async function signInWithGoogle() {
-    const res = await signIn.social({
-      provider: 'google',
-      callbackURL: '/'
-    })
-    if (res.error) return { error: res.error.message || 'Unknown error' }
-    return { error: null }
+    try {
+      // OAuth2 redirects the browser, so this function might not return in the same flow
+      account.createOAuth2Session(
+        OAuthProvider.Google,
+        `${window.location.origin}/`, // Success URL
+        `${window.location.origin}/login` // Failure URL
+      )
+      return { error: null }
+    } catch (err: any) {
+      return { error: err.message || 'Google sign in failed' }
+    }
   }
 
   // Tier logic
@@ -163,7 +157,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     </AuthContext.Provider>
   )
 }
-
 
 export function useAuth() {
   const context = useContext(AuthContext)

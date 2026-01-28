@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { AuthLayout } from '@/components/auth/AuthLayout'
 import { AuthInput } from '@/components/ui/AuthInput'
 
+
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')

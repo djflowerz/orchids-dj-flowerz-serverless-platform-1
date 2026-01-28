@@ -62,28 +62,10 @@ export default function SignupPage() {
       return
     }
 
-    // Send OTP email
-    try {
-      const otpResponse = await fetch('/api/auth/send-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      })
+    // Appwrite handles verification via email if configured
+    toast.success('Account created! You can now log in.')
+    router.push('/login')
 
-      if (!otpResponse.ok) {
-        const data = await otpResponse.json()
-        toast.error(data.error || 'Failed to send verification email')
-        setLoading(false)
-        return
-      }
-
-      toast.success('Account created! Check your email for verification code.')
-      router.push(`/verify-email?email=${encodeURIComponent(email)}`)
-    } catch (otpError) {
-      console.error('OTP send error:', otpError)
-      toast.error('Account created but failed to send verification email. Please contact support.')
-      setLoading(false)
-    }
   }
 
   const handleGoogleSignUp = async () => {
