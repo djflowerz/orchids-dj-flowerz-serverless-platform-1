@@ -75,7 +75,7 @@ export default function TipJarPage() {
     setProcessing(true)
 
     try {
-      const activeKey = paystackKey || process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY
+      const activeKey = paystackKey || process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || "pk_live_2ed6a5c46ebab203998efd1f5d9c22d2dcc05f71"
 
       if (!activeKey) {
         toast.error('Payment system not configured (Missing Public Key)')
