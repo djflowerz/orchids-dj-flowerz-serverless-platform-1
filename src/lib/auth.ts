@@ -1,10 +1,9 @@
-import { createSessionClient } from '@/lib/appwrite'
+import { auth, currentUser } from '@clerk/nextjs/server'
 import { cache } from 'react'
 
 export const getCurrentUser = cache(async () => {
   try {
-    const { account } = await createSessionClient()
-    const user = await account.get()
+    const user = await currentUser()
     return user
   } catch (error) {
     return null
@@ -21,14 +20,18 @@ export async function requireAuth() {
 
 export async function requireAdmin() {
   const user = await requireAuth()
-  if (user.email !== 'ianmuriithiflowerz@gmail.com') {
-    // Optionally check user.prefs.role === 'admin'
+  const email = user.emailAddresses?.[0]?.emailAddress
+
+  if (email !== 'ianmuriithiflowerz@gmail.com') {
+    // Optionally check user.publicMetadata.role === 'admin'
     throw new Error('Admin access required')
   }
   return user
 }
 
-export async function isAdmin(user: { email?: string } | null): Promise<boolean> {
+export async function isAdmin(user: { emailAddresses?: Array<{ emailAddress: string }> } | null): Promise<boolean> {
   if (!user) return false
-  return user.email === 'ianmuriithiflowerz@gmail.com'
+  const email = user.emailAddresses?.[0]?.emailAddress
+  return email === 'ianmuriithiflowerz@gmail.com'
 }
+

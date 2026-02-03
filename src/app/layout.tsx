@@ -59,44 +59,48 @@ export const metadata: Metadata = {
   }
 };
 
+import { ClerkProvider } from "@clerk/nextjs";
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <head>
-        <link rel="apple-touch-icon" href="/icon-192.png" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-      </head>
-      <body className="antialiased">
-        <Script src="https://js.paystack.co/v1/inline.js" strategy="afterInteractive" />
-        <Script
-          id="sw-register"
-          strategy="afterInteractive"
-          dangerouslySetInnerHTML={{
-            __html: `
-                if ('serviceWorker' in navigator) {
-                  window.addEventListener('load', function() {
-                    navigator.serviceWorker.register('/sw.js');
-                  });
-                }
-              `,
-          }}
-        />
-        <ErrorReporter />
-        <StoreProvider>
-          <Providers>
-            <Navbar />
-            <main className="pt-16">
-              {children}
-            </main>
-            <Footer />
-            <Toaster position="bottom-right" theme="dark" />
-          </Providers>
-        </StoreProvider>
-      </body>
-    </html>
+    <ClerkProvider>
+      <html lang="en">
+        <head>
+          <link rel="apple-touch-icon" href="/icon-192.png" />
+          <meta name="apple-mobile-web-app-capable" content="yes" />
+        </head>
+        <body className="antialiased">
+          <Script src="https://js.paystack.co/v1/inline.js" strategy="afterInteractive" />
+          <Script
+            id="sw-register"
+            strategy="afterInteractive"
+            dangerouslySetInnerHTML={{
+              __html: `
+                  if ('serviceWorker' in navigator) {
+                    window.addEventListener('load', function() {
+                      navigator.serviceWorker.register('/sw.js');
+                    });
+                  }
+                `,
+            }}
+          />
+          <ErrorReporter />
+          <StoreProvider>
+            <Providers>
+              <Navbar />
+              <main className="pt-16">
+                {children}
+              </main>
+              <Footer />
+              <Toaster position="bottom-right" theme="dark" />
+            </Providers>
+          </StoreProvider>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

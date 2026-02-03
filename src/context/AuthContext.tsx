@@ -1,10 +1,9 @@
 "use client"
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { createContext, useContext, ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import { account, client } from '@/lib/appwrite'
-import { ID, Models, OAuthProvider } from 'appwrite'
-import { toast } from 'sonner' // switched to sonner based on login page usage
+import { useUser, useClerk } from '@clerk/nextjs'
+import { toast } from 'sonner'
 
 interface User {
   id: string
@@ -21,6 +20,7 @@ interface User {
 interface AuthContextType {
   user: User | null
   isLoading: boolean
+  loading: boolean
   signIn: (email: string, password: string) => Promise<{ error: string | null; redirectTo?: string }>
   signUp: (email: string, password: string, name: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
@@ -33,52 +33,29 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter()
-  const [user, setUser] = useState<User | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const { user: clerkUser, isLoaded } = useUser()
+  const { signOut: clerkSignOut, openSignIn } = useClerk()
 
-  useEffect(() => {
-    checkUser()
-  }, [])
+  // Map Clerk user to our User interface
+  const user: User | null = clerkUser ? {
+    id: clerkUser.id,
+    name: clerkUser.fullName || clerkUser.firstName || 'User',
+    email: clerkUser.emailAddresses?.[0]?.emailAddress || '',
+    image: clerkUser.imageUrl || null,
+    role: (clerkUser.publicMetadata?.role as string) || 'user',
+    emailVerified: clerkUser.emailAddresses?.[0]?.verification?.status === 'verified',
+    createdAt: clerkUser.createdAt?.toString() || new Date().toISOString(),
+    subscription_status: (clerkUser.publicMetadata?.subscription_status as string) || 'none',
+    subscription_tier: (clerkUser.publicMetadata?.subscription_tier as string) || undefined
+  } : null
 
-  async function checkUser() {
-    try {
-      const accountData = await account.get()
-      setUser(mapAppwriteUser(accountData))
-    } catch (error) {
-      setUser(null)
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  function mapAppwriteUser(accountData: Models.User<Models.Preferences>): User {
-    const prefs = accountData.prefs as any;
-    return {
-      id: accountData.$id,
-      name: accountData.name,
-      email: accountData.email,
-      image: null, // Appwrite doesn't store user avatar URL in basic account object
-      role: prefs?.role || 'user',
-      emailVerified: accountData.emailVerification,
-      createdAt: accountData.$createdAt,
-      subscription_status: prefs?.subscription_status || 'none',
-      subscription_tier: prefs?.subscription_tier
-    }
-  }
+  const isAdmin = user?.email === 'ianmuriithiflowerz@gmail.com' || user?.role === 'admin'
 
   async function handleSignIn(email: string, password: string) {
     try {
-      // Delete existing session if any to avoid 401/409
-      try {
-        await account.deleteSession('current')
-      } catch { }
-
-      await account.createEmailPasswordSession(email, password)
-      const user = await account.get()
-      setUser(mapAppwriteUser(user))
-
-      toast.success('Signed in successfully')
-      return { error: null, redirectTo: '/' }
+      // Clerk handles sign-in via components, redirect to sign-in page
+      openSignIn({ redirectUrl: '/' })
+      return { error: null, redirectTo: '/sign-in' }
     } catch (err: any) {
       return { error: err.message || 'Login failed' }
     }
@@ -86,12 +63,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function handleSignUp(email: string, password: string, name: string) {
     try {
-      await account.create(ID.unique(), email, password, name)
-      // Auto login after signup
-      await handleSignIn(email, password)
-      // Optionally trigger verification
-      // await account.createVerification('http://localhost:3000/verify-email');
-
+      // Clerk handles sign-up via components, redirect to sign-up page
+      router.push('/sign-up')
       return { error: null }
     } catch (err: any) {
       return { error: err.message || 'Signup failed' }
@@ -100,59 +73,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function handleSignOut() {
     try {
-      await account.deleteSession('current')
-      setUser(null)
-      router.push('/login')
-      toast.success('Signed out')
-    } catch (err) {
-      console.error(err)
+      await clerkSignOut()
+      toast.success('Signed out successfully')
+      router.push('/')
+    } catch (err: any) {
+      toast.error('Failed to sign out')
     }
   }
 
-  async function signInWithGoogle() {
+  async function handleSignInWithGoogle() {
     try {
-      // OAuth2 redirects the browser, so this function might not return in the same flow
-      account.createOAuth2Session(
-        OAuthProvider.Google,
-        `${window.location.origin}/`, // Success URL
-        `${window.location.origin}/login` // Failure URL
-      )
+      // Clerk handles OAuth via components
+      openSignIn({ redirectUrl: '/' })
       return { error: null }
     } catch (err: any) {
-      return { error: err.message || 'Google sign in failed' }
+      return { error: err.message || 'Google sign-in failed' }
     }
-  }
-
-  // Tier logic
-  const tierHierarchy: Record<string, number> = {
-    'free': 0,
-    'basic': 1,
-    'pro': 2,
-    'unlimited': 3
   }
 
   function checkTierAccess(requiredTier: string): boolean {
-    if (!user) return requiredTier === 'free'
-    if (user.role === 'admin') return true
-    if (user.subscription_status !== 'active') return requiredTier === 'free'
-    const userTierLevel = tierHierarchy[user.subscription_tier || 'free'] || 0
-    const requiredLevel = tierHierarchy[requiredTier] || 0
-    return userTierLevel >= requiredLevel
+    if (!user) return false
+    if (isAdmin) return true
+
+    const tierHierarchy: Record<string, number> = {
+      'basic': 1,
+      'pro': 2,
+      'unlimited': 3
+    }
+
+    const userTierLevel = tierHierarchy[user.subscription_tier || 'basic'] || 0
+    const requiredTierLevel = tierHierarchy[requiredTier] || 0
+
+    return userTierLevel >= requiredTierLevel
   }
 
-  const isAdmin = user?.email === 'ianmuriithiflowerz@gmail.com'
-
   return (
-    <AuthContext.Provider value={{
-      user,
-      isLoading,
-      signIn: handleSignIn,
-      signUp: handleSignUp,
-      signOut: handleSignOut,
-      signInWithGoogle,
-      isAdmin,
-      checkTierAccess
-    }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        isLoading: !isLoaded,
+        loading: !isLoaded,
+        signIn: handleSignIn,
+        signUp: handleSignUp,
+        signOut: handleSignOut,
+        signInWithGoogle: handleSignInWithGoogle,
+        isAdmin,
+        checkTierAccess
+      }}
+    >
       {children}
     </AuthContext.Provider>
   )
@@ -160,8 +128,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext)
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider')
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider')
   }
   return context
 }
