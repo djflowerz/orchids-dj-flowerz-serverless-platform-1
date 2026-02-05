@@ -1,4 +1,4 @@
-import { getServerSupabase } from './auth'
+import { getDocument, runQueryOnEdge, updateDocumentOnEdge, createDocumentOnEdge } from './firestore-edge'
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const TELEGRAM_ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID
@@ -85,33 +85,59 @@ export async function removeUserFromChannel(telegramUserId: string, channelId: s
 }
 
 export async function syncUserTelegramAccess(userId: string): Promise<{ success: boolean; message: string }> {
-  const supabase = getServerSupabase()
-
-  const { data: user } = await supabase
-    .from('users')
-    .select('telegram_user_id, subscription_status, subscription_tier')
-    .eq('id', userId)
-    .single()
+  // Get user data from Firestore
+  const user = await getDocument(`users/${userId}`)
 
   if (!user?.telegram_user_id) {
     return { success: false, message: 'User has no Telegram linked' }
   }
 
-  const { data: subscription } = await supabase
-    .from('subscriptions')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('status', 'active')
-    .order('end_date', { ascending: false })
-    .limit(1)
-    .single()
+  // Get active subscription for user
+  const subscriptionsQuery = {
+    from: [{ collectionId: 'subscriptions' }],
+    where: {
+      compositeFilter: {
+        op: 'AND',
+        filters: [
+          {
+            fieldFilter: {
+              field: { fieldPath: 'user_id' },
+              op: 'EQUAL',
+              value: { stringValue: userId }
+            }
+          },
+          {
+            fieldFilter: {
+              field: { fieldPath: 'status' },
+              op: 'EQUAL',
+              value: { stringValue: 'active' }
+            }
+          }
+        ]
+      }
+    },
+    orderBy: [{ field: { fieldPath: 'end_date' }, direction: 'DESCENDING' }],
+    limit: 1
+  }
+
+  const subscriptions = await runQueryOnEdge('subscriptions', subscriptionsQuery)
+  const subscription = subscriptions[0] || null
 
   const isActive = subscription && new Date(subscription.end_date) > new Date()
 
-  const { data: channels } = await supabase
-    .from('telegram_channels')
-    .select('*')
-    .eq('is_active', true)
+  // Get active telegram channels
+  const channelsQuery = {
+    from: [{ collectionId: 'telegram_channels' }],
+    where: {
+      fieldFilter: {
+        field: { fieldPath: 'is_active' },
+        op: 'EQUAL',
+        value: { booleanValue: true }
+      }
+    }
+  }
+
+  const channels = await runQueryOnEdge('telegram_channels', channelsQuery)
 
   if (!channels?.length) {
     return { success: false, message: 'No active channels configured' }
@@ -124,23 +150,46 @@ export async function syncUserTelegramAccess(userId: string): Promise<{ success:
 
     const shouldHaveAccess = isActive && userTierLevel >= channelTierLevel
 
-    const { data: existingAccess } = await supabase
-      .from('telegram_access')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('channel_id', channel.id)
-      .single()
+    // Check existing access
+    const accessQuery = {
+      from: [{ collectionId: 'telegram_access' }],
+      where: {
+        compositeFilter: {
+          op: 'AND',
+          filters: [
+            {
+              fieldFilter: {
+                field: { fieldPath: 'user_id' },
+                op: 'EQUAL',
+                value: { stringValue: userId }
+              }
+            },
+            {
+              fieldFilter: {
+                field: { fieldPath: 'channel_id' },
+                op: 'EQUAL',
+                value: { stringValue: channel.id }
+              }
+            }
+          ]
+        }
+      },
+      limit: 1
+    }
+
+    const accessRecords = await runQueryOnEdge('telegram_access', accessQuery)
+    const existingAccess = accessRecords[0] || null
 
     if (shouldHaveAccess && (!existingAccess || !existingAccess.access_granted)) {
       await addUserToChannel(user.telegram_user_id, channel.channel_id)
-      
+
       if (existingAccess) {
-        await supabase
-          .from('telegram_access')
-          .update({ access_granted: true, last_sync: new Date().toISOString() })
-          .eq('id', existingAccess.id)
+        await updateDocumentOnEdge('telegram_access', existingAccess.id, {
+          access_granted: true,
+          last_sync: new Date().toISOString()
+        })
       } else {
-        await supabase.from('telegram_access').insert({
+        await createDocumentOnEdge('telegram_access', {
           user_id: userId,
           channel_id: channel.id,
           access_granted: true,
@@ -149,11 +198,11 @@ export async function syncUserTelegramAccess(userId: string): Promise<{ success:
       }
     } else if (!shouldHaveAccess && existingAccess?.access_granted) {
       await removeUserFromChannel(user.telegram_user_id, channel.channel_id)
-      
-      await supabase
-        .from('telegram_access')
-        .update({ access_granted: false, last_sync: new Date().toISOString() })
-        .eq('id', existingAccess.id)
+
+      await updateDocumentOnEdge('telegram_access', existingAccess.id, {
+        access_granted: false,
+        last_sync: new Date().toISOString()
+      })
     }
   }
 
@@ -161,29 +210,51 @@ export async function syncUserTelegramAccess(userId: string): Promise<{ success:
 }
 
 export async function syncAllExpiredSubscriptions(): Promise<number> {
-  const supabase = getServerSupabase()
+  const today = new Date().toISOString().split('T')[0]
 
-  const { data: expiredSubs } = await supabase
-    .from('subscriptions')
-    .select('user_id')
-    .eq('status', 'active')
-    .lt('end_date', new Date().toISOString().split('T')[0])
+  // Query for expired subscriptions
+  const expiredQuery = {
+    from: [{ collectionId: 'subscriptions' }],
+    where: {
+      compositeFilter: {
+        op: 'AND',
+        filters: [
+          {
+            fieldFilter: {
+              field: { fieldPath: 'status' },
+              op: 'EQUAL',
+              value: { stringValue: 'active' }
+            }
+          },
+          {
+            fieldFilter: {
+              field: { fieldPath: 'end_date' },
+              op: 'LESS_THAN',
+              value: { stringValue: today }
+            }
+          }
+        ]
+      }
+    }
+  }
+
+  const expiredSubs = await runQueryOnEdge('subscriptions', expiredQuery)
 
   if (!expiredSubs?.length) return 0
 
   let syncedCount = 0
 
   for (const sub of expiredSubs) {
-    await supabase
-      .from('subscriptions')
-      .update({ status: 'expired' })
-      .eq('user_id', sub.user_id)
-      .eq('status', 'active')
+    // Update subscription status
+    await updateDocumentOnEdge('subscriptions', sub.id, {
+      status: 'expired'
+    })
 
-    await supabase
-      .from('users')
-      .update({ subscription_status: 'expired', role: 'user' })
-      .eq('id', sub.user_id)
+    // Update user status
+    await updateDocumentOnEdge('users', sub.user_id, {
+      subscription_status: 'expired',
+      role: 'user'
+    })
 
     await syncUserTelegramAccess(sub.user_id)
     syncedCount++

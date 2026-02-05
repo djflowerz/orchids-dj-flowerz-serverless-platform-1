@@ -1,44 +1,26 @@
-import { prisma } from '@/lib/prisma'
+
 import { NextResponse } from 'next/server'
-import type { Product } from '@prisma/client'
+import { auth, currentUser } from '@clerk/nextjs/server'
+import { getDocument, updateDocumentOnEdge, deleteDocumentOnEdge } from '@/lib/firestore-edge'
 
 export const runtime = 'edge'
 
 export async function GET(
     request: Request,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> } // Params as Promise in Next 15+
 ) {
     try {
-        const product = await prisma.product.findUnique({
-            where: { id: params.id },
-            include: {
-                store: {
-                    select: {
-                        name: true,
-                        username: true,
-                        logo: true,
-                        email: true
-                    }
-                },
-                ratings: {
-                    select: {
-                        id: true,
-                        rating: true,
-                        comment: true,
-                        userId: true,
-                        createdAt: true
-                    },
-                    orderBy: { createdAt: 'desc' },
-                    take: 10
-                }
-            }
-        })
+        const { id } = await params
+        const product = await getDocument(`products/${id}`)
 
         if (!product) {
             return NextResponse.json({ error: 'Product not found' }, { status: 404 })
         }
 
-        // Map to frontend interface
+        const store = product.store || { name: 'DJ Flowerz', username: 'djflowerz', logo: null, email: null }
+        const ratings = product.ratings || []
+        const avgRating = ratings.length > 0 ? ratings.reduce((sum: number, r: any) => sum + r.rating, 0) / ratings.length : 0
+
         const mappedProduct = {
             id: product.id,
             title: product.name,
@@ -47,17 +29,15 @@ export async function GET(
             mrp: product.mrp,
             category: product.category,
             cover_images: product.images,
-            image_url: product.images[0] || null,
+            image_url: (product.images && product.images[0]) ? product.images[0] : null,
             is_trending: product.isTrending,
             is_free: product.price === 0,
             in_stock: product.inStock,
-            created_at: product.createdAt.toISOString(),
-            store: product.store,
-            ratings: product.ratings,
-            average_rating: product.ratings.length > 0
-                ? product.ratings.reduce((sum, r) => sum + r.rating, 0) / product.ratings.length
-                : 0,
-            review_count: product.ratings.length
+            created_at: product.createdAt,
+            store: store,
+            ratings: ratings, // Returning array of ratings (might be large if not careful)
+            average_rating: avgRating,
+            review_count: ratings.length
         }
 
         return NextResponse.json(mappedProduct)
@@ -69,43 +49,36 @@ export async function GET(
 
 export async function PUT(
     request: Request,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const session = await auth.api.getSession({
-            headers: request.headers
-        })
+        const { userId } = auth()
+        const user = await currentUser()
 
-        if (!session?.user) {
+        if (!userId || !user) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        // Admin check
-        const user = await prisma.user.findUnique({
-            where: { id: session.user.id },
-            select: { role: true, email: true }
-        })
-
-        const isAdmin = user?.role === 'admin' || user?.email === 'ianmuriithiflowerz@gmail.com'
+        const email = user.emailAddresses[0]?.emailAddress
+        const isAdmin = user.publicMetadata?.role === 'admin' || email === 'ianmuriithiflowerz@gmail.com'
 
         if (!isAdmin) {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         }
 
+        const { id } = await params
         const body = await request.json()
 
-        const product = await prisma.product.update({
-            where: { id: params.id },
-            data: {
-                name: body.title,
-                description: body.description,
-                price: body.price !== undefined ? parseFloat(body.price) : undefined,
-                mrp: body.mrp !== undefined ? parseFloat(body.mrp) : undefined,
-                category: body.category,
-                images: body.cover_images,
-                inStock: body.stock !== undefined ? parseInt(body.stock) : undefined
-            }
-        })
+        const updates: any = {}
+        if (body.title) updates.name = body.title
+        if (body.description) updates.description = body.description
+        if (body.price !== undefined) updates.price = parseFloat(body.price)
+        if (body.mrp !== undefined) updates.mrp = parseFloat(body.mrp)
+        if (body.category) updates.category = body.category
+        if (body.cover_images) updates.images = body.cover_images
+        if (body.stock !== undefined) updates.inStock = parseInt(body.stock)
+
+        const product = await updateDocumentOnEdge('products', id, updates)
 
         return NextResponse.json(product)
 
@@ -117,32 +90,25 @@ export async function PUT(
 
 export async function DELETE(
     request: Request,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const session = await auth.api.getSession({
-            headers: request.headers
-        })
+        const { userId } = auth()
+        const user = await currentUser()
 
-        if (!session?.user) {
+        if (!userId || !user) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        // Admin check
-        const user = await prisma.user.findUnique({
-            where: { id: session.user.id },
-            select: { role: true, email: true }
-        })
-
-        const isAdmin = user?.role === 'admin' || user?.email === 'ianmuriithiflowerz@gmail.com'
+        const email = user.emailAddresses[0]?.emailAddress
+        const isAdmin = user.publicMetadata?.role === 'admin' || email === 'ianmuriithiflowerz@gmail.com'
 
         if (!isAdmin) {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         }
 
-        await prisma.product.delete({
-            where: { id: params.id }
-        })
+        const { id } = await params
+        await deleteDocumentOnEdge('products', id)
 
         return NextResponse.json({ success: true })
 

@@ -1,6 +1,7 @@
+
 import { NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
 import { getRequestContext } from '@cloudflare/next-on-pages'
+import { updateDocumentOnEdge, createDocumentOnEdge } from '@/lib/firestore-edge'
 
 export const runtime = 'edge'
 
@@ -19,7 +20,6 @@ async function verifySignature(body: string, signature: string, secret: string):
             ['verify']
         )
 
-        // Convert hex signature to Uint8Array safely
         if (!signature || signature.length % 2 !== 0) return false
         const signatureBytes = new Uint8Array(signature.match(/[\da-f]{2}/gi)!.map((h) => parseInt(h, 16)))
 
@@ -39,109 +39,85 @@ async function processEvent(eventData: any) {
     console.log('[Paystack Webhook] Background processing event:', eventData.event)
 
     if (eventData.event === 'charge.success') {
-        const { reference, id, amount, customer } = eventData.data
+        const { reference, amount, customer } = eventData.data
         console.log(`[Paystack Webhook] Processing payment success for reference: ${reference}`)
 
         try {
             const metadata = eventData.data.metadata || {}
             const type = metadata.type || 'product'
 
-            // Data for transaction record
             const transactionData = {
                 reference: reference,
                 type: type,
-                status: 'success', // Paystack charge.success means success
+                status: 'success',
                 amount: amount || 0,
                 email: customer?.email || '',
                 metadata: metadata,
-                paymentMethod: 'PAYSTACK'
+                paymentMethod: 'PAYSTACK',
+                createdAt: new Date()
             }
 
             if (type === 'booking') {
                 const bookingId = metadata.booking_id
-
-                await prisma.recordingBooking.update({
-                    where: { id: bookingId },
-                    data: {
-                        isPaid: true,
-                        status: 'CONFIRMED',
-                        paymentReference: reference
-                    }
+                await updateDocumentOnEdge('recording_bookings', bookingId, {
+                    is_paid: true,
+                    status: 'CONFIRMED',
+                    payment_reference: reference,
+                    payment_method: 'PAYSTACK'
                 })
 
-                // Create Transaction linked to Booking
-                await prisma.transaction.create({
-                    data: {
-                        ...transactionData,
-                        bookingId: bookingId,
-                        ...(metadata.user_id ? { userId: metadata.user_id } : {})
-                    }
+                await createDocumentOnEdge('transactions', {
+                    ...transactionData,
+                    bookingId
                 })
-
                 console.log(`[Paystack Webhook] ✅ Booking ${bookingId} CONFIRMED & Transaction Saved`)
 
             } else if (type === 'subscription') {
                 const userId = metadata.user_id
-
                 if (userId) {
-                    await prisma.user.update({
-                        where: { id: userId },
-                        data: {
-                            subscription_status: 'active',
-                            subscription_tier: 'unlimited',
-                            subscription_expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-                            updatedAt: new Date()
-                        }
+                    // Update user subscription status
+                    await updateDocumentOnEdge('users', userId, {
+                        subscription_status: 'active',
+                        subscription_tier: 'unlimited',
+                        subscription_expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+                        updatedAt: new Date()
                     })
 
-                    // Create Transaction linked to User
-                    await prisma.transaction.create({
-                        data: {
-                            ...transactionData,
-                            userId: userId
-                        }
+                    await createDocumentOnEdge('transactions', {
+                        ...transactionData,
+                        userId
                     })
-
                     console.log(`[Paystack Webhook] ✅ User ${userId} subscription activated & Transaction Saved`)
                 } else {
-                    console.warn(`[Paystack Webhook] ⚠️ Subscription paid but no user_id found in metadata`)
-                    // Create unlinked transaction
-                    await prisma.transaction.create({
-                        data: transactionData
-                    })
+                    await createDocumentOnEdge('transactions', transactionData)
                 }
 
             } else {
                 // Product Order
-                const orderId = metadata.order_id || reference
+                const orderId = metadata.order_id || reference  // fallback to reference if order_id missing, though order update might fail if IDs don't match
 
-                try {
-                    await prisma.order.update({
-                        where: { id: orderId },
-                        data: {
+                // If orderId is same as reference (unlikely for existing orders), it might just be a direct transaction
+                // Assuming orderId IS passed in metadata correctly.
+
+                if (metadata.order_id) {
+                    try {
+                        await updateDocumentOnEdge('orders', orderId, {
                             status: 'PROCESSING',
                             isPaid: true,
                             paymentMethod: 'PAYSTACK'
-                        }
-                    })
-                    console.log(`[Paystack Webhook] ✅ Order ${orderId} marked as PAID`)
-
-                    // Create Transaction linked to Order
-                    await prisma.transaction.create({
-                        data: {
-                            ...transactionData,
-                            orderId: orderId,
-                            ...(metadata.user_id ? { userId: metadata.user_id } : {})
-                        }
-                    })
-
-                } catch (orderError) {
-                    console.error(`[Paystack Webhook] Failed to update order ${orderId}:`, orderError)
-                    // Fallback: Just save transaction
-                    await prisma.transaction.create({
-                        data: transactionData
-                    })
+                        })
+                        console.log(`[Paystack Webhook] ✅ Order ${orderId} marked as PAID`)
+                    } catch (e) {
+                        console.error(`[Paystack Webhook] Failed to update order ${orderId}`, e)
+                        // continue to create transaction
+                    }
                 }
+
+                await createDocumentOnEdge('transactions', {
+                    ...transactionData,
+                    orderId: metadata.order_id || null,
+                    userId: metadata.user_id || null
+                })
             }
 
         } catch (err) {
@@ -155,10 +131,7 @@ export async function POST(req: Request) {
     try {
         const body = await req.text()
         const signature = req.headers.get('x-paystack-signature')
-
-        // Try to get secret from process.env (Node/Next compatibility) or Cloudflare env if applicable
-        // With next-on-pages, process.env is typically populated
-        const secret = process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK
+        const secret = process.env.PAYSTACK_SECRET_KEY
 
         if (!secret) {
             console.error('[Paystack Webhook] critical: PAYSTACK_SECRET_KEY is missing')
@@ -166,7 +139,6 @@ export async function POST(req: Request) {
         }
 
         if (!signature) {
-            console.warn('[Paystack Webhook] Missing signature header')
             return NextResponse.json({ error: 'No signature provided' }, { status: 401 })
         }
 
@@ -176,22 +148,17 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
         }
 
-        // Signature valid! Return 200 OK immediately per Paystack guidelines
         const eventData = JSON.parse(body)
 
-        // Use Cloudflare's waitUntil to keep the lambda alive for background processing
         try {
             const { ctx } = getRequestContext()
             if (ctx && typeof ctx.waitUntil === 'function') {
                 ctx.waitUntil(processEvent(eventData))
             } else {
-                // Fallback if ctx is not available/mocked correctly
-                console.warn('[Paystack Webhook] ctx.waitUntil not found, running inline (risk of timeout)')
                 await processEvent(eventData)
             }
         } catch (e) {
-            // Fallback for environments where getRequestContext might fail (e.g. local dev without wrangler)
-            console.warn('[Paystack Webhook] getRequestContext failed (likely local dev), awaiting handler directly.')
+            // Local fallback
             await processEvent(eventData)
         }
 
@@ -199,9 +166,6 @@ export async function POST(req: Request) {
 
     } catch (error) {
         console.error('[Paystack Webhook] Request processing error:', error)
-        return NextResponse.json({
-            error: 'Webhook request failed',
-            details: error instanceof Error ? error.message : 'Unknown error'
-        }, { status: 500 })
+        return NextResponse.json({ error: 'Webhook request failed' }, { status: 500 })
     }
 }

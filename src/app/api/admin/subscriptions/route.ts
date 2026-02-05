@@ -1,9 +1,8 @@
-
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { runQueryOnEdge } from "@/lib/firestore-edge";
 import { requireAdmin } from "@/lib/auth";
 
-export const dynamic = 'force-dynamic';
+export const runtime = 'edge';
 
 export async function GET(req: Request) {
     try {
@@ -12,28 +11,45 @@ export async function GET(req: Request) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        const subs = await prisma.subscription.findMany({
-            orderBy: { createdAt: 'desc' },
-            include: {
-                user: {
-                    select: { name: true, email: true }
-                }
-            }
-        });
+        const query = {
+            from: [{ collectionId: 'subscriptions' }],
+            orderBy: [{ field: { fieldPath: 'created_at' }, direction: 'DESCENDING' }]
+        };
 
-        // Map to frontend interface
-        const formattedSubs = subs.map(s => ({
-            id: s.id,
-            user_id: s.userId,
-            user_name: s.user.name,
-            user_email: s.userEmail, // or s.user.email
-            tier: s.tier,
-            status: s.status,
-            start_date: s.startDate.toISOString(),
-            end_date: s.endDate.toISOString(),
-            telegram_channels: s.telegramChannels,
-            created_at: s.createdAt.toISOString()
-        }));
+        const subs = await runQueryOnEdge('subscriptions', query);
+
+        // Fetch user details for each subscription
+        const formattedSubs = await Promise.all(
+            subs.map(async (s) => {
+                // Fetch user details
+                const userQuery = {
+                    from: [{ collectionId: 'users' }],
+                    where: {
+                        fieldFilter: {
+                            field: { fieldPath: 'id' },
+                            op: 'EQUAL',
+                            value: { stringValue: s.user_id }
+                        }
+                    },
+                    limit: 1
+                };
+                const users = await runQueryOnEdge('users', userQuery);
+                const user = users[0] || {};
+
+                return {
+                    id: s.id,
+                    user_id: s.user_id,
+                    user_name: user.name || user.email || 'Unknown',
+                    user_email: s.user_email || user.email,
+                    tier: s.tier,
+                    status: s.status,
+                    start_date: s.start_date,
+                    end_date: s.end_date,
+                    telegram_channels: s.telegram_channels || [],
+                    created_at: s.created_at
+                };
+            })
+        );
 
         return NextResponse.json(formattedSubs);
     } catch (error: any) {

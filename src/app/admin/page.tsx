@@ -9,10 +9,17 @@ import {
   LogOut, Home, Plus, Edit, Trash2, Eye, Download,
   ExternalLink, X, AlertCircle, TrendingUp, ShoppingBag,
   Upload, Play, Shield, Activity, BarChart3, Save, Key, Hash, Check, Truck,
-  ChevronLeft, ChevronRight, ChevronDown, Filter, Copy, CheckCircle, Mic2, Briefcase
+  ChevronLeft, ChevronRight, ChevronDown, Filter, Copy, CheckCircle, Mic2, Briefcase,
+  Tag, MessageSquare, Wrench
 } from 'lucide-react'
 import RecordingSessionsTab from './RecordingSessionsTab'
 import RecordingBookingsTab from './RecordingBookingsTab'
+import MarketingTab from './MarketingTab'
+import ShippingTab from './ShippingTab'
+import CommentsTab from './CommentsTab'
+import EquipmentTab from './EquipmentTab'
+import SystemHealthTab from './SystemHealthTab'
+import ActivityFeed from './ActivityFeed'
 import { Product } from '@/lib/types'
 import { toast } from 'sonner'
 
@@ -174,7 +181,7 @@ interface SiteSettings {
   autoSyncEnabled: boolean
 }
 
-type TabType = 'dashboard' | 'users' | 'products' | 'mixtapes' | 'music-pool' | 'subscriptions' | 'event-bookings' | 'recording-sessions' | 'recording-bookings' | 'payments' | 'tips' | 'telegram' | 'reports' | 'settings' | 'orders'
+type TabType = 'dashboard' | 'users' | 'products' | 'mixtapes' | 'music-pool' | 'subscriptions' | 'event-bookings' | 'recording-sessions' | 'recording-bookings' | 'payments' | 'tips' | 'telegram' | 'reports' | 'settings' | 'orders' | 'marketing' | 'shipping' | 'moderation' | 'inventory' | 'system'
 
 
 function UserDetailModal({ user, onClose }: { user: UserData; onClose: () => void }) {
@@ -419,6 +426,11 @@ function AdminContent() {
     { id: 'reports' as TabType, label: 'Reports', icon: FileText },
     { id: 'settings' as TabType, label: 'Settings', icon: Settings },
     { id: 'orders' as TabType, label: 'Orders', icon: ShoppingBag },
+    { id: 'marketing' as TabType, label: 'Marketing & Coupons', icon: Tag },
+    { id: 'shipping' as TabType, label: 'Shipping', icon: Truck },
+    { id: 'moderation' as TabType, label: 'Moderation', icon: MessageSquare },
+    { id: 'inventory' as TabType, label: 'Equipment', icon: Wrench },
+    { id: 'system' as TabType, label: 'System Health', icon: Activity },
   ]
 
   const formatCurrency = (amount: number) => new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(amount / 100)
@@ -745,6 +757,9 @@ function AdminContent() {
               stats={stats}
               bookings={bookings}
               transactions={transactions}
+              users={users}
+              orders={orders}
+              mixtapes={mixtapes}
               formatCurrency={formatCurrency}
               formatDate={formatDate}
               getStatusBadge={getStatusBadge}
@@ -886,11 +901,18 @@ function AdminContent() {
           {activeTab === 'orders' && (
             <OrdersTab
               orders={orders}
+              setOrders={setOrders}
               formatDate={formatDate}
               formatCurrency={formatCurrency}
               getStatusBadge={getStatusBadge}
             />
           )}
+
+          {activeTab === 'marketing' && <MarketingTab />}
+          {activeTab === 'shipping' && <ShippingTab />}
+          {activeTab === 'moderation' && <CommentsTab />}
+          {activeTab === 'inventory' && <EquipmentTab />}
+          {activeTab === 'system' && <SystemHealthTab />}
         </div>
       </main>
 
@@ -1180,7 +1202,7 @@ function StatCard({ icon: Icon, label, value, trend, color }: { icon: any; label
   )
 }
 
-function DashboardTab({ stats, bookings, transactions, formatCurrency, formatDate, getStatusBadge, dateFilter, setDateFilter }: any) {
+function DashboardTab({ stats, bookings, transactions, users, orders, mixtapes, formatCurrency, formatDate, getStatusBadge, dateFilter, setDateFilter }: any) {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -1208,42 +1230,48 @@ function DashboardTab({ stats, bookings, transactions, formatCurrency, formatDat
         <StatCard icon={ShoppingBag} label="Pending Orders" value={stats.pendingOrders} color="amber" />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white/5 rounded-2xl border border-white/10 p-6">
-          <h3 className="text-lg font-semibold mb-4">Recent Bookings</h3>
-          <div className="space-y-3">
-            {bookings.slice(0, 5).map((booking: Booking) => (
-              <div key={booking.id} className="flex items-center justify-between p-3 rounded-xl bg-white/5">
-                <div>
-                  <p className="font-medium">{booking.customer_name}</p>
-                  <p className="text-sm text-white/50">{booking.event_type} • {formatDate(booking.event_date)}</p>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+          <div className="bg-white/5 rounded-2xl border border-white/10 p-6">
+            <h3 className="text-lg font-semibold mb-4">Recent Bookings</h3>
+            <div className="space-y-3">
+              {bookings.slice(0, 5).map((booking: Booking) => (
+                <div key={booking.id} className="flex items-center justify-between p-3 rounded-xl bg-white/5">
+                  <div>
+                    <p className="font-medium">{booking.customer_name}</p>
+                    <p className="text-sm text-white/50">{booking.event_type} • {formatDate(booking.event_date)}</p>
+                  </div>
+                  <span className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${getStatusBadge(booking.status)}`}>
+                    {booking.status}
+                  </span>
                 </div>
-                <span className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${getStatusBadge(booking.status)}`}>
-                  {booking.status}
-                </span>
-              </div>
-            ))}
-            {bookings.length === 0 && <p className="text-white/50 text-center py-4">No bookings yet</p>}
+              ))}
+              {bookings.length === 0 && <p className="text-white/50 text-center py-4">No bookings yet</p>}
+            </div>
+          </div>
+
+          <div className="bg-white/5 rounded-2xl border border-white/10 p-6">
+            <h3 className="text-lg font-semibold mb-4">Recent Transactions</h3>
+            <div className="space-y-3">
+              {transactions.slice(0, 5).map((tx: Transaction) => (
+                <div key={tx.id} className="flex items-center justify-between p-3 rounded-xl bg-white/5">
+                  <div>
+                    <p className="font-medium">{tx.user_email}</p>
+                    <p className="text-sm text-white/50">{tx.type}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-medium">{formatCurrency(tx.amount)}</p>
+                    <span className={`px-2 py-0.5 rounded text-xs ${getStatusBadge(tx.status)}`}>{tx.status}</span>
+                  </div>
+                </div>
+              ))}
+              {transactions.length === 0 && <p className="text-white/50 text-center py-4">No transactions yet</p>}
+            </div>
           </div>
         </div>
 
-        <div className="bg-white/5 rounded-2xl border border-white/10 p-6">
-          <h3 className="text-lg font-semibold mb-4">Recent Transactions</h3>
-          <div className="space-y-3">
-            {transactions.slice(0, 5).map((tx: Transaction) => (
-              <div key={tx.id} className="flex items-center justify-between p-3 rounded-xl bg-white/5">
-                <div>
-                  <p className="font-medium">{tx.user_email}</p>
-                  <p className="text-sm text-white/50">{tx.type}</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-medium">{formatCurrency(tx.amount)}</p>
-                  <span className={`px-2 py-0.5 rounded text-xs ${getStatusBadge(tx.status)}`}>{tx.status}</span>
-                </div>
-              </div>
-            ))}
-            {transactions.length === 0 && <p className="text-white/50 text-center py-4">No transactions yet</p>}
-          </div>
+        <div className="lg:col-span-1">
+          <ActivityFeed users={users} orders={orders} bookings={bookings} transactions={transactions} mixtapes={mixtapes} />
         </div>
       </div>
     </div>
@@ -2631,7 +2659,7 @@ function OrderDetailModal({ order, onClose, formatCurrency, formatDate }: { orde
   )
 }
 
-function OrdersTab({ orders, formatDate, formatCurrency, getStatusBadge }: { orders: Order[]; formatDate: (d: string) => string; formatCurrency: (n: number) => string; getStatusBadge: (s: string) => string }) {
+function OrdersTab({ orders, setOrders, formatDate, formatCurrency, getStatusBadge }: { orders: Order[]; setOrders: (o: Order[]) => void; formatDate: (d: string) => string; formatCurrency: (n: number) => string; getStatusBadge: (s: string) => string }) {
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterType, setFilterType] = useState('all')
   const [page, setPage] = useState(1)
@@ -4230,4 +4258,4 @@ export default function AdminPage() {
 }
 
 
-export const runtime = 'edge';
+

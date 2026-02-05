@@ -1,11 +1,14 @@
-import { prisma } from '@/lib/prisma'
+import { runQueryOnEdge } from '@/lib/firestore-edge'
 import { NextResponse } from 'next/server'
 
 export const runtime = 'edge'
 
 export async function GET() {
     try {
-        const settings = await prisma.siteSettings.findFirst()
+        const result = await runQueryOnEdge('site_settings', {
+            limit: 1
+        })
+        const settings = result[0]
 
         // Return only public fields
         const publicSettings = {

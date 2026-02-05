@@ -1,6 +1,9 @@
-import { prisma } from "@/lib/prisma"
+
 import { NextRequest, NextResponse } from "next/server"
 import { requireAdmin } from "@/lib/auth"
+import { getDocument, updateDocumentOnEdge, deleteDocumentOnEdge } from "@/lib/firestore-edge"
+
+export const runtime = 'edge'
 
 export async function GET(
     request: NextRequest,
@@ -8,9 +11,7 @@ export async function GET(
 ) {
     try {
         const { id } = await params
-        const session = await prisma.recordingSession.findUnique({
-            where: { id }
-        })
+        const session = await getDocument(`recordingSessions/${id}`)
 
         if (!session) {
             return NextResponse.json({ error: "Session not found" }, { status: 404 })
@@ -32,21 +33,22 @@ export async function PATCH(
         const body = await request.json()
 
         // Clean up numeric fields
-        if (body.basePrice) body.basePrice = parseFloat(body.basePrice)
-        if (body.hourlyRate) body.hourlyRate = parseFloat(body.hourlyRate)
-        if (body.duration) body.duration = parseInt(body.duration)
-        if (body.maxParticipants) body.maxParticipants = parseInt(body.maxParticipants)
+        const data: any = { ...body }
+        if (data.basePrice) data.basePrice = parseFloat(data.basePrice)
+        if (data.hourlyRate) data.hourlyRate = parseFloat(data.hourlyRate)
+        if (data.duration) data.duration = parseInt(data.duration)
+        if (data.maxParticipants) data.maxParticipants = parseInt(data.maxParticipants)
 
-        const session = await prisma.recordingSession.update({
-            where: { id },
-            data: body
-        })
+        // Remove id if present in body to avoid error
+        delete data.id
+
+        const session = await updateDocumentOnEdge('recordingSessions', id, data)
 
         return NextResponse.json(session)
     } catch (error: any) {
         return NextResponse.json(
             { error: "Failed to update session" },
-            { status: error.message === 'Unauthorized' ? 401 : 500 }
+            { status: error.message === 'Admin access required' ? 401 : 500 }
         )
     }
 }
@@ -59,15 +61,13 @@ export async function DELETE(
         await requireAdmin()
         const { id } = await params
 
-        await prisma.recordingSession.delete({
-            where: { id }
-        })
+        await deleteDocumentOnEdge('recordingSessions', id)
 
         return NextResponse.json({ success: true })
     } catch (error: any) {
         return NextResponse.json(
             { error: "Failed to delete session" },
-            { status: error.message === 'Unauthorized' ? 401 : 500 }
+            { status: error.message === 'Admin access required' ? 401 : 500 }
         )
     }
 }

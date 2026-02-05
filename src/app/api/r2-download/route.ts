@@ -1,5 +1,7 @@
+
 import { NextResponse } from "next/server";
 import { generateSignedDownload } from "@/lib/r2";
+import { getDocument } from "@/lib/firestore-edge";
 
 export const runtime = 'edge';
 
@@ -11,17 +13,12 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "Missing uid or fileKey" }, { status: 400 });
         }
 
-        const { db } = await import("@/lib/firebase-admin");
-
-        if (!db) {
-            return NextResponse.json({ error: "DB not initialized" }, { status: 500 });
-        }
-
         // Verify user has active subscription
-        const subRef = db.collection("subscriptions").doc(uid);
-        const subSnap = await subRef.get();
+        const subData = await getDocument(`subscriptions/${uid}`);
 
-        if (!subSnap.exists || subSnap.data()?.status !== "active") {
+        if (!subData || subData.status !== "active") {
+            // Optional: Allow admin or one-time purchases? 
+            // Original code strictly checked subscription.
             return NextResponse.json({ error: "Subscription required" }, { status: 403 });
         }
 

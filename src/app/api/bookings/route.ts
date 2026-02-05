@@ -1,20 +1,50 @@
-import { prisma } from "@/lib/prisma"
+import { runQueryOnEdge, createDocumentOnEdge } from "@/lib/firestore-edge"
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
+
+export const runtime = 'edge';
 
 export async function GET(request: NextRequest) {
     try {
         const user = await requireAuth()
 
-        const bookings = await prisma.recordingBooking.findMany({
-            where: { userId: user.id },
-            include: {
-                session: true
+        const query = {
+            from: [{ collectionId: 'recording_bookings' }],
+            where: {
+                fieldFilter: {
+                    field: { fieldPath: 'user_id' },
+                    op: 'EQUAL',
+                    value: { stringValue: user.id }
+                }
             },
-            orderBy: { scheduledDate: 'desc' }
-        })
+            orderBy: [{ field: { fieldPath: 'scheduled_date' }, direction: 'DESCENDING' }]
+        };
 
-        return NextResponse.json(bookings)
+        const bookings = await runQueryOnEdge('recording_bookings', query)
+
+        // Fetch session details for each booking
+        const bookingsWithSessions = await Promise.all(
+            bookings.map(async (booking) => {
+                if (booking.session_id) {
+                    const sessionQuery = {
+                        from: [{ collectionId: 'recording_sessions' }],
+                        where: {
+                            fieldFilter: {
+                                field: { fieldPath: 'id' },
+                                op: 'EQUAL',
+                                value: { stringValue: booking.session_id }
+                            }
+                        },
+                        limit: 1
+                    };
+                    const sessions = await runQueryOnEdge('recording_sessions', sessionQuery);
+                    return { ...booking, session: sessions[0] || null };
+                }
+                return booking;
+            })
+        );
+
+        return NextResponse.json(bookingsWithSessions)
     } catch (error: any) {
         return NextResponse.json(
             { error: "Failed to fetch bookings" },
@@ -40,23 +70,19 @@ export async function POST(request: NextRequest) {
             paymentMethod
         } = body
 
-        // Verify session availability (basic check)
-        // In a real app, we'd check for overlapping bookings here
-
-        const booking = await prisma.recordingBooking.create({
-            data: {
-                userId: user.id,
-                sessionId,
-                scheduledDate: new Date(scheduledDate),
-                scheduledTime,
-                duration: parseInt(duration),
-                location,
-                equipmentNeeds: equipmentNeeds ? JSON.stringify(equipmentNeeds) : null,
-                notes,
-                totalPrice: parseFloat(totalPrice),
-                paymentMethod,
-                status: 'PENDING'
-            }
+        const booking = await createDocumentOnEdge('recording_bookings', {
+            user_id: user.id,
+            session_id: sessionId,
+            scheduled_date: scheduledDate,
+            scheduled_time: scheduledTime,
+            duration: parseInt(duration),
+            location,
+            equipment_needs: equipmentNeeds ? JSON.stringify(equipmentNeeds) : null,
+            notes,
+            total_price: parseFloat(totalPrice),
+            payment_method: paymentMethod,
+            status: 'PENDING',
+            created_at: new Date().toISOString()
         })
 
         // TODO: Init Payment (M-Pesa) here if needed

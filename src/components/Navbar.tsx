@@ -30,6 +30,7 @@ export function Navbar() {
     { href: '/bookings', label: 'Bookings', icon: Calendar },
     { href: '/tip-jar', label: 'Tip Jar', icon: Heart, isButton: true },
     { href: '/contact', label: 'Contact', icon: MessageCircle },
+    { href: '/about', label: 'About', icon: User },
   ]
 
   const isActive = (href: string) => {

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { runQueryOnEdge, createDocumentOnEdge, updateDocumentOnEdge, deleteDocumentOnEdge } from '@/lib/firestore-edge'
 import { requireAdmin, getCurrentUser } from '@/lib/auth'
+
+export const runtime = 'edge';
 
 // GET /api/music-pool - List music pool tracks
 export async function GET(request: NextRequest) {
@@ -11,52 +13,55 @@ export async function GET(request: NextRequest) {
         const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : undefined
         const active = searchParams.get('active') === 'true'
 
-        let where: any = {}
+        const filters: any[] = []
 
         if (!all) {
-            where.isActive = true
+            filters.push({
+                fieldFilter: {
+                    field: { fieldPath: 'is_active' },
+                    op: 'EQUAL',
+                    value: { booleanValue: true }
+                }
+            })
         }
 
         if (tier && tier !== 'All') {
-            where.tier = tier
+            filters.push({
+                fieldFilter: {
+                    field: { fieldPath: 'tier' },
+                    op: 'EQUAL',
+                    value: { stringValue: tier }
+                }
+            })
         }
 
-        const tracks = await prisma.musicPoolTrack.findMany({
-            where,
-            orderBy: {
-                createdAt: 'desc'
-            },
-            ...(limit ? { take: limit } : {})
-        })
+        const query: any = {
+            from: [{ collectionId: 'music_pool' }],
+            orderBy: [{ field: { fieldPath: 'created_at' }, direction: 'DESCENDING' }]
+        }
 
-        // Map to frontend format
-        const formattedTracks = tracks.map((t: typeof tracks[number]) => ({
-            id: t.id,
-            title: t.title,
-            artist: t.artist,
-            genre: t.genre,
-            bpm: t.bpm,
-            trackLink: t.trackLink,
-            audio_file_path: t.trackLink, // For compatibility
-            coverImage: t.coverImage,
-            cover_image: t.coverImage, // For compatibility
-            tier: t.tier,
-            downloads: t.downloads,
-            music_key: t.musicKey,
-            version: t.version,
-            is_active: t.isActive,
-            release_date: t.releaseDate?.toISOString(),
-            created_at: t.createdAt.toISOString()
-        }))
+        if (filters.length > 0) {
+            query.where = filters.length === 1 ? filters[0] : {
+                compositeFilter: {
+                    op: 'AND',
+                    filters
+                }
+            }
+        }
 
-        return NextResponse.json(formattedTracks)
+        if (limit) {
+            query.limit = limit
+        }
+
+        const tracks = await runQueryOnEdge('music_pool', query)
+
+        return NextResponse.json(tracks)
     } catch (error) {
         console.error('Error fetching music pool tracks:', error)
         return NextResponse.json({ error: 'Failed to fetch tracks' }, { status: 500 })
     }
 }
 
-// POST /api/music-pool - Create new track (admin only)
 // POST /api/music-pool - Create new track (admin only)
 export async function POST(request: NextRequest) {
     try {
@@ -72,20 +77,21 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Title, artist, track link, and tier are required' }, { status: 400 })
         }
 
-        const track = await prisma.musicPoolTrack.create({
-            data: {
-                title,
-                artist,
-                genre,
-                bpm: bpm ? parseInt(bpm) : 0,
-                trackLink,
-                coverImage: coverImage || '',
-                tier,
-                musicKey,
-                version,
-                isActive: isActive !== undefined ? isActive : true,
-                releaseDate: releaseDate ? new Date(releaseDate) : undefined
-            }
+        const track = await createDocumentOnEdge('music_pool', {
+            title,
+            artist,
+            genre,
+            bpm: bpm ? parseInt(bpm) : 0,
+            track_link: trackLink,
+            audio_file_path: trackLink,
+            cover_image: coverImage || '',
+            tier,
+            music_key: musicKey,
+            version,
+            is_active: isActive !== undefined ? isActive : true,
+            release_date: releaseDate || null,
+            downloads: 0,
+            created_at: new Date().toISOString()
         })
 
         return NextResponse.json(track)
@@ -99,7 +105,6 @@ export async function POST(request: NextRequest) {
 }
 
 // PUT /api/music-pool - Update track (admin only)
-// PUT /api/music-pool - Update track (admin only)
 export async function PUT(request: NextRequest) {
     try {
         await requireAdmin()
@@ -111,23 +116,23 @@ export async function PUT(request: NextRequest) {
             return NextResponse.json({ error: 'Track ID is required' }, { status: 400 })
         }
 
-        const prismaData: any = {}
-        if (updateData.title !== undefined) prismaData.title = updateData.title
-        if (updateData.artist !== undefined) prismaData.artist = updateData.artist
-        if (updateData.genre !== undefined) prismaData.genre = updateData.genre
-        if (updateData.bpm !== undefined) prismaData.bpm = parseInt(updateData.bpm)
-        if (updateData.trackLink !== undefined) prismaData.trackLink = updateData.trackLink
-        if (updateData.coverImage !== undefined) prismaData.coverImage = updateData.coverImage
-        if (updateData.tier !== undefined) prismaData.tier = updateData.tier
-        if (updateData.musicKey !== undefined) prismaData.musicKey = updateData.musicKey
-        if (updateData.version !== undefined) prismaData.version = updateData.version
-        if (updateData.isActive !== undefined) prismaData.isActive = updateData.isActive
-        if (updateData.releaseDate !== undefined) prismaData.releaseDate = new Date(updateData.releaseDate)
+        const firestoreData: any = {}
+        if (updateData.title !== undefined) firestoreData.title = updateData.title
+        if (updateData.artist !== undefined) firestoreData.artist = updateData.artist
+        if (updateData.genre !== undefined) firestoreData.genre = updateData.genre
+        if (updateData.bpm !== undefined) firestoreData.bpm = parseInt(updateData.bpm)
+        if (updateData.trackLink !== undefined) {
+            firestoreData.track_link = updateData.trackLink
+            firestoreData.audio_file_path = updateData.trackLink
+        }
+        if (updateData.coverImage !== undefined) firestoreData.cover_image = updateData.coverImage
+        if (updateData.tier !== undefined) firestoreData.tier = updateData.tier
+        if (updateData.musicKey !== undefined) firestoreData.music_key = updateData.musicKey
+        if (updateData.version !== undefined) firestoreData.version = updateData.version
+        if (updateData.isActive !== undefined) firestoreData.is_active = updateData.isActive
+        if (updateData.releaseDate !== undefined) firestoreData.release_date = updateData.releaseDate
 
-        const track = await prisma.musicPoolTrack.update({
-            where: { id },
-            data: prismaData
-        })
+        const track = await updateDocumentOnEdge('music_pool', id, firestoreData)
 
         return NextResponse.json(track)
     } catch (error: any) {
@@ -151,9 +156,7 @@ export async function DELETE(request: NextRequest) {
             return NextResponse.json({ error: 'Track ID is required' }, { status: 400 })
         }
 
-        await prisma.musicPoolTrack.delete({
-            where: { id }
-        })
+        await deleteDocumentOnEdge('music_pool', id)
 
         return NextResponse.json({ success: true })
     } catch (error: any) {

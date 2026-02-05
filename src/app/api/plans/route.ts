@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { runQueryOnEdge, createDocumentOnEdge, updateDocumentOnEdge, deleteDocumentOnEdge } from '@/lib/firestore-edge'
 import { requireAdmin } from '@/lib/auth'
+
+export const runtime = 'edge';
 
 // GET /api/plans - List all plans (public for active, all for admin)
 export async function GET(request: NextRequest) {
@@ -8,31 +10,24 @@ export async function GET(request: NextRequest) {
         const { searchParams } = new URL(request.url)
         const all = searchParams.get('all') === 'true'
 
-        const where: any = all ? {} : { isActive: true }
+        const query: any = {
+            from: [{ collectionId: 'plans' }],
+            orderBy: [{ field: { fieldPath: 'price' }, direction: 'ASCENDING' }]
+        }
 
-        const plans = await prisma.plan.findMany({
-            where,
-            orderBy: {
-                price: 'asc'
+        if (!all) {
+            query.where = {
+                fieldFilter: {
+                    field: { fieldPath: 'is_active' },
+                    op: 'EQUAL',
+                    value: { booleanValue: true }
+                }
             }
-        })
+        }
 
-        // Map to frontend format
-        const formattedPlans = plans.map(p => ({
-            id: p.id,
-            name: p.name,
-            price: p.price,
-            durationDays: p.durationDays,
-            channels: p.channels,
-            isActive: p.isActive,
-            createdAt: p.createdAt.toISOString(),
-            description: p.description,
-            features: p.features,
-            tier: p.tier,
-            duration: p.duration
-        }))
+        const plans = await runQueryOnEdge('plans', query)
 
-        return NextResponse.json(formattedPlans)
+        return NextResponse.json(plans)
     } catch (error) {
         console.error('Error fetching plans:', error)
         return NextResponse.json({ error: 'Failed to fetch plans' }, { status: 500 })
@@ -64,18 +59,17 @@ export async function POST(request: NextRequest) {
             )
         }
 
-        const plan = await prisma.plan.create({
-            data: {
-                name,
-                price: parseFloat(price),
-                durationDays: parseInt(durationDays),
-                channels: channels || [],
-                isActive: isActive !== undefined ? isActive : true,
-                description,
-                features: features || [],
-                tier,
-                duration
-            }
+        const plan = await createDocumentOnEdge('plans', {
+            name,
+            price: parseFloat(price),
+            duration_days: parseInt(durationDays),
+            channels: channels || [],
+            is_active: isActive !== undefined ? isActive : true,
+            description,
+            features: features || [],
+            tier,
+            duration,
+            created_at: new Date().toISOString()
         })
 
         return NextResponse.json(plan)
@@ -100,21 +94,18 @@ export async function PUT(request: NextRequest) {
             return NextResponse.json({ error: 'Plan ID is required' }, { status: 400 })
         }
 
-        const prismaData: any = {}
-        if (updateData.name !== undefined) prismaData.name = updateData.name
-        if (updateData.price !== undefined) prismaData.price = parseFloat(updateData.price)
-        if (updateData.durationDays !== undefined) prismaData.durationDays = parseInt(updateData.durationDays)
-        if (updateData.channels !== undefined) prismaData.channels = updateData.channels
-        if (updateData.isActive !== undefined) prismaData.isActive = updateData.isActive
-        if (updateData.description !== undefined) prismaData.description = updateData.description
-        if (updateData.features !== undefined) prismaData.features = updateData.features
-        if (updateData.tier !== undefined) prismaData.tier = updateData.tier
-        if (updateData.duration !== undefined) prismaData.duration = updateData.duration
+        const firestoreData: any = {}
+        if (updateData.name !== undefined) firestoreData.name = updateData.name
+        if (updateData.price !== undefined) firestoreData.price = parseFloat(updateData.price)
+        if (updateData.durationDays !== undefined) firestoreData.duration_days = parseInt(updateData.durationDays)
+        if (updateData.channels !== undefined) firestoreData.channels = updateData.channels
+        if (updateData.isActive !== undefined) firestoreData.is_active = updateData.isActive
+        if (updateData.description !== undefined) firestoreData.description = updateData.description
+        if (updateData.features !== undefined) firestoreData.features = updateData.features
+        if (updateData.tier !== undefined) firestoreData.tier = updateData.tier
+        if (updateData.duration !== undefined) firestoreData.duration = updateData.duration
 
-        const plan = await prisma.plan.update({
-            where: { id },
-            data: prismaData
-        })
+        const plan = await updateDocumentOnEdge('plans', id, firestoreData)
 
         return NextResponse.json(plan)
     } catch (error: any) {
@@ -138,9 +129,7 @@ export async function DELETE(request: NextRequest) {
             return NextResponse.json({ error: 'Plan ID is required' }, { status: 400 })
         }
 
-        await prisma.plan.delete({
-            where: { id }
-        })
+        await deleteDocumentOnEdge('plans', id)
 
         return NextResponse.json({ success: true })
     } catch (error: any) {

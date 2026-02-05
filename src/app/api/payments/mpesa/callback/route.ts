@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { runQueryOnEdge, updateDocumentOnEdge } from '@/lib/firestore-edge';
+
+export const runtime = 'edge';
 
 export async function POST(req: Request) {
     try {
@@ -30,53 +32,34 @@ export async function POST(req: Request) {
                 }
             }
 
-            // Update Booking
-            // We look for the booking with the matching CheckoutRequestID stored in paymentReference
-            // This presumes we stored it there in the initialization step
-            const booking = await prisma.recordingBooking.findFirst({
+            // Find booking with matching CheckoutRequestID
+            const query = {
+                from: [{ collectionId: 'recording_bookings' }],
                 where: {
-                    paymentReference: CheckoutRequestID,
+                    fieldFilter: {
+                        field: { fieldPath: 'payment_reference' },
+                        op: 'EQUAL',
+                        value: { stringValue: CheckoutRequestID }
+                    }
                 },
-            });
+                limit: 1
+            };
+
+            const bookings = await runQueryOnEdge('recording_bookings', query);
+            const booking = bookings[0] || null;
 
             if (booking) {
-                // Find user to get email - need to fetch user relation
-                const updatedBooking = await prisma.recordingBooking.update({
-                    where: { id: booking.id },
-                    data: {
-                        isPaid: true,
-                        status: 'CONFIRMED',
-                        paymentReference: mpesaReceiptNumber || CheckoutRequestID,
-                    },
-                    include: {
-                        user: true,
-                        session: true,
-                    }
+                // Update booking status
+                await updateDocumentOnEdge('recording_bookings', booking.id, {
+                    is_paid: true,
+                    status: 'CONFIRMED',
+                    payment_reference: mpesaReceiptNumber || CheckoutRequestID
                 });
 
                 console.log(`Booking ${booking.id} marked as paid.`);
 
-                // Send Payment Received Email
-                try {
-                    const { resend, FROM_EMAIL } = await import('@/lib/resend');
-                    const { PaymentReceivedEmail } = await import('@/emails/PaymentReceivedEmail');
-
-                    await resend.emails.send({
-                        from: FROM_EMAIL,
-                        to: updatedBooking.user.email,
-                        subject: 'Payment Received - DJ Flowerz Studios',
-                        react: PaymentReceivedEmail({
-                            customerName: updatedBooking.user.name || 'Valued Customer',
-                            sessionName: updatedBooking.session.name,
-                            bookingDate: new Date(updatedBooking.scheduledDate).toLocaleDateString(),
-                            bookingTime: updatedBooking.scheduledTime,
-                            amount: updatedBooking.totalPrice,
-                            receiptNumber: mpesaReceiptNumber || CheckoutRequestID,
-                        }),
-                    });
-                } catch (emailError) {
-                    console.error('Failed to send payment email:', emailError);
-                }
+                // Note: Email sending removed as Resend was removed from dependencies
+                // You can implement email notifications using a different service if needed
 
             } else {
                 console.error(`Booking not found for CheckoutRequestID: ${CheckoutRequestID}`);

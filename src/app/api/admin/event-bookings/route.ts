@@ -1,9 +1,8 @@
-
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { runQueryOnEdge, createDocumentOnEdge, updateDocumentOnEdge, deleteDocumentOnEdge } from "@/lib/firestore-edge";
 import { requireAdmin } from "@/lib/auth";
 
-export const dynamic = 'force-dynamic';
+export const runtime = 'edge';
 
 export async function GET(req: Request) {
     try {
@@ -16,34 +15,29 @@ export async function GET(req: Request) {
         const id = searchParams.get('id');
 
         if (id) {
-            const booking = await prisma.eventBooking.findUnique({
-                where: { id }
-            });
-            return NextResponse.json(booking);
+            const query = {
+                from: [{ collectionId: 'event_bookings' }],
+                where: {
+                    fieldFilter: {
+                        field: { fieldPath: 'id' },
+                        op: 'EQUAL',
+                        value: { stringValue: id }
+                    }
+                },
+                limit: 1
+            };
+            const results = await runQueryOnEdge('event_bookings', query);
+            return NextResponse.json(results[0] || null);
         }
 
-        const bookings = await prisma.eventBooking.findMany({
-            orderBy: { createdAt: 'desc' }
-        });
+        const query = {
+            from: [{ collectionId: 'event_bookings' }],
+            orderBy: [{ field: { fieldPath: 'created_at' }, direction: 'DESCENDING' }]
+        };
 
-        // Map fields to match frontend expectation (snake_case)
-        const formattedBookings = bookings.map(b => ({
-            id: b.id,
-            customer_name: b.customerName,
-            email: b.email,
-            phone: b.phone,
-            event_type: b.eventType,
-            event_date: b.eventDate.toISOString(),
-            event_time: b.eventTime,
-            location: b.location,
-            status: b.status,
-            amount: b.amount,
-            notes: b.notes,
-            assigned_dj: b.assignedDj,
-            created_at: b.createdAt.toISOString()
-        }));
+        const bookings = await runQueryOnEdge('event_bookings', query);
 
-        return NextResponse.json(formattedBookings);
+        return NextResponse.json(bookings);
     } catch (error: any) {
         console.error("[Event Bookings API] Error:", error);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
@@ -59,42 +53,24 @@ export async function POST(req: Request) {
 
         const body = await req.json();
 
-        // Convert snake_case from frontend to camelCase for Prisma
         const data = {
-            customerName: body.customer_name,
+            customer_name: body.customer_name,
             email: body.email,
             phone: body.phone,
-            eventType: body.event_type,
-            eventDate: new Date(body.event_date),
-            eventTime: body.event_time,
+            event_type: body.event_type,
+            event_date: body.event_date,
+            event_time: body.event_time,
             location: body.location,
             status: body.status || 'pending',
             amount: parseFloat(body.amount),
             notes: body.notes,
-            assignedDj: body.assigned_dj
+            assigned_dj: body.assigned_dj,
+            created_at: new Date().toISOString()
         };
 
-        const booking = await prisma.eventBooking.create({
-            data
-        });
+        const booking = await createDocumentOnEdge('event_bookings', data);
 
-        const formatted = {
-            id: booking.id,
-            customer_name: booking.customerName,
-            email: booking.email,
-            phone: booking.phone,
-            event_type: booking.eventType,
-            event_date: booking.eventDate.toISOString(),
-            event_time: booking.eventTime,
-            location: booking.location,
-            status: booking.status,
-            amount: booking.amount,
-            notes: booking.notes,
-            assigned_dj: booking.assignedDj,
-            created_at: booking.createdAt.toISOString()
-        };
-
-        return NextResponse.json(formatted);
+        return NextResponse.json(booking);
     } catch (error: any) {
         console.error("[Event Create Error]", error);
         return NextResponse.json({ error: "Failed to create booking" }, { status: 500 });
@@ -113,42 +89,22 @@ export async function PUT(req: Request) {
 
         if (!id) return NextResponse.json({ error: "ID required" }, { status: 400 });
 
-        // Map updates
         const data: any = {};
-        if (updateData.customer_name) data.customerName = updateData.customer_name;
+        if (updateData.customer_name) data.customer_name = updateData.customer_name;
         if (updateData.email) data.email = updateData.email;
         if (updateData.phone) data.phone = updateData.phone;
-        if (updateData.event_type) data.eventType = updateData.event_type;
-        if (updateData.event_date) data.eventDate = new Date(updateData.event_date);
-        if (updateData.event_time) data.eventTime = updateData.event_time;
+        if (updateData.event_type) data.event_type = updateData.event_type;
+        if (updateData.event_date) data.event_date = updateData.event_date;
+        if (updateData.event_time) data.event_time = updateData.event_time;
         if (updateData.location) data.location = updateData.location;
         if (updateData.status) data.status = updateData.status;
         if (updateData.amount) data.amount = parseFloat(updateData.amount);
         if (updateData.notes) data.notes = updateData.notes;
-        if (updateData.assigned_dj) data.assignedDj = updateData.assigned_dj;
+        if (updateData.assigned_dj) data.assigned_dj = updateData.assigned_dj;
 
-        const booking = await prisma.eventBooking.update({
-            where: { id },
-            data
-        });
+        const booking = await updateDocumentOnEdge('event_bookings', id, data);
 
-        const formatted = {
-            id: booking.id,
-            customer_name: booking.customerName,
-            email: booking.email,
-            phone: booking.phone,
-            event_type: booking.eventType,
-            event_date: booking.eventDate.toISOString(),
-            event_time: booking.eventTime,
-            location: booking.location,
-            status: booking.status,
-            amount: booking.amount,
-            notes: booking.notes,
-            assigned_dj: booking.assignedDj,
-            created_at: booking.createdAt.toISOString()
-        };
-
-        return NextResponse.json(formatted);
+        return NextResponse.json(booking);
 
     } catch (error: any) {
         console.error("[Event Update Error]", error);
@@ -168,9 +124,7 @@ export async function DELETE(req: Request) {
 
         if (!id) return NextResponse.json({ error: "ID required" }, { status: 400 });
 
-        await prisma.eventBooking.delete({
-            where: { id }
-        });
+        await deleteDocumentOnEdge('event_bookings', id);
 
         return NextResponse.json({ success: true });
     } catch (error: any) {

@@ -1,40 +1,51 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { requireAdmin } from '@/lib/auth'
 
-// GET /api/mixtapes - List all mixtapes (public) or admin view
+import { NextRequest, NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/auth'
+import { runQueryOnEdge, createDocumentOnEdge, updateDocumentOnEdge, deleteDocumentOnEdge } from '@/lib/firestore-edge'
+
+export const runtime = 'edge'
+
 export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url)
         const all = searchParams.get('all') === 'true'
-        const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : undefined
+        const limitStr = searchParams.get('limit')
+        const limit = limitStr ? parseInt(limitStr) : 50
 
-        const where: any = all ? {} : { status: 'active' }
+        const structuredQuery: any = {
+            from: [{ collectionId: 'mixtapes' }],
+            orderBy: [{ field: { fieldPath: 'createdAt' }, direction: 'DESCENDING' }],
+            limit: limit
+        }
 
-        const mixtapes = await prisma.mixtape.findMany({
-            where,
-            orderBy: {
-                createdAt: 'desc'
-            },
-            ...(limit ? { take: limit } : {})
-        })
+        if (!all) {
+            structuredQuery.where = {
+                fieldFilter: {
+                    field: { fieldPath: 'status' },
+                    op: 'EQUAL',
+                    value: { stringValue: 'active' }
+                }
+            }
+        }
 
-        // Map to frontend format (camelCase to snake_case for compatibility)
-        const formattedMixtapes = mixtapes.map(m => ({
+        const mixtapes = await runQueryOnEdge('mixtapes', structuredQuery)
+
+        // Map to frontend format
+        const formattedMixtapes = mixtapes.map((m: any) => ({
             id: m.id,
             title: m.title,
             description: m.description,
             coverImage: m.coverImage,
-            cover_image: m.coverImage, // Alias for compatibility
+            cover_image: m.coverImage,
             mixLink: m.mixLink,
             audio_url: m.audioUrl,
             video_url: m.videoUrl,
             genre: m.genre,
             price: m.price,
             isFree: m.isFree,
-            plays: m.plays,
+            plays: m.plays || 0,
             status: m.status,
-            created_at: m.createdAt.toISOString(),
+            created_at: m.createdAt,
             audio_download_url: m.audioDownloadUrl,
             video_download_url: m.videoDownloadUrl,
             embed_url: m.embedUrl,
@@ -43,19 +54,25 @@ export async function GET(request: NextRequest) {
         }))
 
         return NextResponse.json(formattedMixtapes)
+
     } catch (error) {
         console.error('Error fetching mixtapes:', error)
         return NextResponse.json({ error: 'Failed to fetch mixtapes' }, { status: 500 })
     }
 }
 
-// POST /api/mixtapes - Create new mixtape (admin only)
 export async function POST(request: NextRequest) {
     try {
         await requireAdmin()
 
         const body = await request.json()
         const {
+            title, description, coverImage, mixLink, audioUrl, videoUrl,
+            genre, price, isFree, status, audioDownloadUrl,
+            videoDownloadUrl, embedUrl, isHot, isNewArrival
+        } = body
+
+        const data = {
             title,
             description,
             coverImage,
@@ -63,47 +80,30 @@ export async function POST(request: NextRequest) {
             audioUrl,
             videoUrl,
             genre,
-            price,
-            isFree,
-            status,
+            price: price ? parseFloat(price) : 0,
+            isFree: isFree !== undefined ? isFree : true,
+            status: status || 'active',
             audioDownloadUrl,
             videoDownloadUrl,
             embedUrl,
-            isHot,
-            isNewArrival
-        } = body
+            isHot: isHot || false,
+            isNewArrival: isNewArrival || false,
+            createdAt: new Date().toISOString(),
+            plays: 0
+        }
 
-        const mixtape = await prisma.mixtape.create({
-            data: {
-                title,
-                description,
-                coverImage,
-                mixLink,
-                audioUrl,
-                videoUrl,
-                genre,
-                price: price ? parseFloat(price) : 0,
-                isFree: isFree !== undefined ? isFree : true,
-                status: status || 'active',
-                audioDownloadUrl,
-                videoDownloadUrl,
-                embedUrl,
-                isHot: isHot || false,
-                isNewArrival: isNewArrival || false
-            }
-        })
+        const id = await createDocumentOnEdge('mixtapes', data)
+        return NextResponse.json({ id, ...data })
 
-        return NextResponse.json(mixtape)
     } catch (error: any) {
         console.error('Error creating mixtape:', error)
         return NextResponse.json(
             { error: error.message || 'Failed to create mixtape' },
-            { status: error.message?.includes('Unauthorized') || error.message?.includes('Admin') ? 401 : 500 }
+            { status: error.message?.includes('Admin') ? 401 : 500 }
         )
     }
 }
 
-// PUT /api/mixtapes - Update mixtape (admin only)
 export async function PUT(request: NextRequest) {
     try {
         await requireAdmin()
@@ -111,65 +111,49 @@ export async function PUT(request: NextRequest) {
         const body = await request.json()
         const { id, ...updateData } = body
 
-        if (!id) {
-            return NextResponse.json({ error: 'Mixtape ID is required' }, { status: 400 })
+        if (!id) return NextResponse.json({ error: 'Mixtape ID is required' }, { status: 400 })
+
+        // Clean data
+        const data: any = {}
+        const fields = [
+            'title', 'description', 'coverImage', 'mixLink', 'audioUrl', 'videoUrl',
+            'genre', 'price', 'isFree', 'status', 'audioDownloadUrl',
+            'videoDownloadUrl', 'embedUrl', 'isHot', 'isNewArrival'
+        ]
+
+        for (const field of fields) {
+            if (updateData[field] !== undefined) data[field] = updateData[field]
         }
+        if (data.price) data.price = parseFloat(data.price)
 
-        // Convert camelCase fields if needed
-        const prismaData: any = {}
-        if (updateData.title !== undefined) prismaData.title = updateData.title
-        if (updateData.description !== undefined) prismaData.description = updateData.description
-        if (updateData.coverImage !== undefined) prismaData.coverImage = updateData.coverImage
-        if (updateData.mixLink !== undefined) prismaData.mixLink = updateData.mixLink
-        if (updateData.audioUrl !== undefined) prismaData.audioUrl = updateData.audioUrl
-        if (updateData.videoUrl !== undefined) prismaData.videoUrl = updateData.videoUrl
-        if (updateData.genre !== undefined) prismaData.genre = updateData.genre
-        if (updateData.price !== undefined) prismaData.price = parseFloat(updateData.price)
-        if (updateData.isFree !== undefined) prismaData.isFree = updateData.isFree
-        if (updateData.status !== undefined) prismaData.status = updateData.status
-        if (updateData.audioDownloadUrl !== undefined) prismaData.audioDownloadUrl = updateData.audioDownloadUrl
-        if (updateData.videoDownloadUrl !== undefined) prismaData.videoDownloadUrl = updateData.videoDownloadUrl
-        if (updateData.embedUrl !== undefined) prismaData.embedUrl = updateData.embedUrl
-        if (updateData.isHot !== undefined) prismaData.isHot = updateData.isHot
-        if (updateData.isNewArrival !== undefined) prismaData.isNewArrival = updateData.isNewArrival
+        const updated = await updateDocumentOnEdge('mixtapes', id, data)
+        return NextResponse.json(updated)
 
-        const mixtape = await prisma.mixtape.update({
-            where: { id },
-            data: prismaData
-        })
-
-        return NextResponse.json(mixtape)
     } catch (error: any) {
         console.error('Error updating mixtape:', error)
         return NextResponse.json(
             { error: error.message || 'Failed to update mixtape' },
-            { status: error.message?.includes('Unauthorized') || error.message?.includes('Admin') ? 401 : 500 }
+            { status: error.message?.includes('Admin') ? 401 : 500 }
         )
     }
 }
 
-// DELETE /api/mixtapes - Delete mixtape (admin only)
 export async function DELETE(request: NextRequest) {
     try {
         await requireAdmin()
-
         const { searchParams } = new URL(request.url)
         const id = searchParams.get('id')
 
-        if (!id) {
-            return NextResponse.json({ error: 'Mixtape ID is required' }, { status: 400 })
-        }
+        if (!id) return NextResponse.json({ error: 'Mixtape ID is required' }, { status: 400 })
 
-        await prisma.mixtape.delete({
-            where: { id }
-        })
-
+        await deleteDocumentOnEdge('mixtapes', id)
         return NextResponse.json({ success: true })
+
     } catch (error: any) {
         console.error('Error deleting mixtape:', error)
         return NextResponse.json(
             { error: error.message || 'Failed to delete mixtape' },
-            { status: error.message?.includes('Unauthorized') || error.message?.includes('Admin') ? 401 : 500 }
+            { status: error.message?.includes('Admin') ? 401 : 500 }
         )
     }
 }

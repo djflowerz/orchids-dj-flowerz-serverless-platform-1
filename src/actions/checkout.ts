@@ -1,10 +1,9 @@
 
 "use server"
 
-
 import { redirect } from "next/navigation"
 import { getDocument, createDocumentOnEdge } from "@/lib/firestore-edge"
-import { getAuthenticatedUser } from "@/lib/firebase-auth-edge"
+import { auth, currentUser } from '@clerk/nextjs/server'
 
 // Paystack API (Edge Compatible)
 async function initializePaystackTransaction(email: string, amountInKobo: number, metadata: any, reference?: string) {
@@ -48,10 +47,9 @@ export async function createCheckout(productId: string, userEmail?: string) {
     }
 
     try {
-        // Prefer authenticated user data if available
-        const authUser = await getAuthenticatedUser()
-        const email = authUser?.email || userEmail
-        const userId = authUser?.uid
+        const { userId } = auth()
+        const user = await currentUser()
+        const email = user?.emailAddresses[0]?.emailAddress || userEmail
 
         if (!email) {
             throw new Error("Email is required for checkout")
@@ -103,6 +101,7 @@ export async function createCheckout(productId: string, userEmail?: string) {
                 created_at: now,
                 updated_at: now
             }
+            // Use 'subscriptions' collection path
             reference = await createDocumentOnEdge('subscriptions', subData)
         } else {
             // Create pending order

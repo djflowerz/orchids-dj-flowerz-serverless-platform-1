@@ -1,4 +1,4 @@
-import { getServerSupabase } from './auth'
+import { runQueryOnEdge, createDocumentOnEdge, updateDocumentOnEdge, deleteDocumentOnEdge } from './firestore-edge'
 import crypto from 'crypto'
 
 const RATE_LIMIT_WINDOW = 15 * 60 * 1000 // 15 minutes
@@ -17,16 +17,44 @@ export async function checkRateLimit(
   endpoint: string,
   maxRequests: number = MAX_API_REQUESTS
 ): Promise<RateLimitResult> {
-  const supabase = getServerSupabase()
   const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW)
 
-  const { data: existing } = await supabase
-    .from('rate_limits')
-    .select('*')
-    .eq('identifier', identifier)
-    .eq('endpoint', endpoint)
-    .gte('window_start', windowStart.toISOString())
-    .single()
+  // Query for existing rate limit record
+  const query = {
+    from: [{ collectionId: 'rate_limits' }],
+    where: {
+      compositeFilter: {
+        op: 'AND',
+        filters: [
+          {
+            fieldFilter: {
+              field: { fieldPath: 'identifier' },
+              op: 'EQUAL',
+              value: { stringValue: identifier }
+            }
+          },
+          {
+            fieldFilter: {
+              field: { fieldPath: 'endpoint' },
+              op: 'EQUAL',
+              value: { stringValue: endpoint }
+            }
+          },
+          {
+            fieldFilter: {
+              field: { fieldPath: 'window_start' },
+              op: 'GREATER_THAN_OR_EQUAL',
+              value: { stringValue: windowStart.toISOString() }
+            }
+          }
+        ]
+      }
+    },
+    limit: 1
+  }
+
+  const results = await runQueryOnEdge('rate_limits', query)
+  const existing = results[0] || null
 
   if (existing) {
     if (existing.count >= maxRequests) {
@@ -37,10 +65,9 @@ export async function checkRateLimit(
       }
     }
 
-    await supabase
-      .from('rate_limits')
-      .update({ count: existing.count + 1 })
-      .eq('id', existing.id)
+    await updateDocumentOnEdge('rate_limits', existing.id, {
+      count: existing.count + 1
+    })
 
     return {
       allowed: true,
@@ -49,7 +76,7 @@ export async function checkRateLimit(
     }
   }
 
-  await supabase.from('rate_limits').insert({
+  await createDocumentOnEdge('rate_limits', {
     identifier,
     endpoint,
     count: 1,
@@ -69,13 +96,12 @@ export async function recordLoginAttempt(
   userAgent: string,
   success: boolean
 ): Promise<void> {
-  const supabase = getServerSupabase()
-
-  await supabase.from('login_attempts').insert({
+  await createDocumentOnEdge('login_attempts', {
     email: email.toLowerCase(),
     ip_address: ipAddress,
     user_agent: userAgent,
-    success
+    success,
+    created_at: new Date().toISOString()
   })
 
   if (!success) {
@@ -92,24 +118,78 @@ export async function recordLoginAttempt(
 }
 
 export async function getRecentFailedAttempts(email: string, ipAddress: string): Promise<number> {
-  const supabase = getServerSupabase()
   const windowStart = new Date(Date.now() - LOCKOUT_DURATION)
 
-  const { count } = await supabase
-    .from('login_attempts')
-    .select('*', { count: 'exact', head: true })
-    .eq('email', email.toLowerCase())
-    .eq('success', false)
-    .gte('created_at', windowStart.toISOString())
+  // Query by email
+  const emailQuery = {
+    from: [{ collectionId: 'login_attempts' }],
+    where: {
+      compositeFilter: {
+        op: 'AND',
+        filters: [
+          {
+            fieldFilter: {
+              field: { fieldPath: 'email' },
+              op: 'EQUAL',
+              value: { stringValue: email.toLowerCase() }
+            }
+          },
+          {
+            fieldFilter: {
+              field: { fieldPath: 'success' },
+              op: 'EQUAL',
+              value: { booleanValue: false }
+            }
+          },
+          {
+            fieldFilter: {
+              field: { fieldPath: 'created_at' },
+              op: 'GREATER_THAN_OR_EQUAL',
+              value: { stringValue: windowStart.toISOString() }
+            }
+          }
+        ]
+      }
+    }
+  }
 
-  const { count: ipCount } = await supabase
-    .from('login_attempts')
-    .select('*', { count: 'exact', head: true })
-    .eq('ip_address', ipAddress)
-    .eq('success', false)
-    .gte('created_at', windowStart.toISOString())
+  // Query by IP
+  const ipQuery = {
+    from: [{ collectionId: 'login_attempts' }],
+    where: {
+      compositeFilter: {
+        op: 'AND',
+        filters: [
+          {
+            fieldFilter: {
+              field: { fieldPath: 'ip_address' },
+              op: 'EQUAL',
+              value: { stringValue: ipAddress }
+            }
+          },
+          {
+            fieldFilter: {
+              field: { fieldPath: 'success' },
+              op: 'EQUAL',
+              value: { booleanValue: false }
+            }
+          },
+          {
+            fieldFilter: {
+              field: { fieldPath: 'created_at' },
+              op: 'GREATER_THAN_OR_EQUAL',
+              value: { stringValue: windowStart.toISOString() }
+            }
+          }
+        ]
+      }
+    }
+  }
 
-  return Math.max(count || 0, ipCount || 0)
+  const emailResults = await runQueryOnEdge('login_attempts', emailQuery)
+  const ipResults = await runQueryOnEdge('login_attempts', ipQuery)
+
+  return Math.max(emailResults.length, ipResults.length)
 }
 
 export async function isAccountLocked(email: string, ipAddress: string): Promise<boolean> {
@@ -123,13 +203,12 @@ export async function createSecurityAlert(
   message: string,
   metadata: Record<string, unknown> = {}
 ): Promise<void> {
-  const supabase = getServerSupabase()
-
-  await supabase.from('security_alerts').insert({
+  await createDocumentOnEdge('security_alerts', {
     alert_type: alertType,
     severity,
     message,
-    metadata
+    metadata,
+    created_at: new Date().toISOString()
   })
 
   if (severity === 'high' || severity === 'critical') {
@@ -148,8 +227,8 @@ async function sendTelegramAlert(
   if (!botToken || !chatId) return
 
   try {
-    const text = `🚨 *Security Alert*\n\n*Type:* ${alertType}\n*Message:* ${message}\n*Details:* ${JSON.stringify(metadata, null, 2)}`
-    
+    const text = `🚨 *Security Alert*\\n\\n*Type:* ${alertType}\\n*Message:* ${message}\\n*Details:* ${JSON.stringify(metadata, null, 2)}`
+
     await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -239,34 +318,55 @@ export async function logAdminAction(
   details: Record<string, unknown>,
   ipAddress?: string
 ): Promise<void> {
-  const supabase = getServerSupabase()
-
-  await supabase.from('admin_logs').insert({
+  await createDocumentOnEdge('admin_logs', {
     admin_id: adminId,
     action,
     entity_type: entityType,
     entity_id: entityId,
     details,
-    ip_address: ipAddress
+    ip_address: ipAddress,
+    created_at: new Date().toISOString()
   })
 }
 
 export async function cleanupExpiredRateLimits(): Promise<void> {
-  const supabase = getServerSupabase()
   const cutoff = new Date(Date.now() - RATE_LIMIT_WINDOW * 2)
 
-  await supabase
-    .from('rate_limits')
-    .delete()
-    .lt('window_start', cutoff.toISOString())
+  const query = {
+    from: [{ collectionId: 'rate_limits' }],
+    where: {
+      fieldFilter: {
+        field: { fieldPath: 'window_start' },
+        op: 'LESS_THAN',
+        value: { stringValue: cutoff.toISOString() }
+      }
+    }
+  }
+
+  const expiredRecords = await runQueryOnEdge('rate_limits', query)
+
+  for (const record of expiredRecords) {
+    await deleteDocumentOnEdge('rate_limits', record.id)
+  }
 }
 
 export async function cleanupOldLoginAttempts(): Promise<void> {
-  const supabase = getServerSupabase()
   const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // 7 days
 
-  await supabase
-    .from('login_attempts')
-    .delete()
-    .lt('created_at', cutoff.toISOString())
+  const query = {
+    from: [{ collectionId: 'login_attempts' }],
+    where: {
+      fieldFilter: {
+        field: { fieldPath: 'created_at' },
+        op: 'LESS_THAN',
+        value: { stringValue: cutoff.toISOString() }
+      }
+    }
+  }
+
+  const oldRecords = await runQueryOnEdge('login_attempts', query)
+
+  for (const record of oldRecords) {
+    await deleteDocumentOnEdge('login_attempts', record.id)
+  }
 }

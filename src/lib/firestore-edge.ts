@@ -128,49 +128,41 @@ function mapValue(val: any): any {
     return { stringValue: String(val) }
 }
 
-export async function updateOrderOnEdge(orderId: string, updates: Record<string, any>) {
-    const sa = getServiceAccount()
-    if (!sa) throw new Error('Service Account not found')
-
-    const token = await getAccessToken(sa)
-    const fields: Record<string, any> = {}
-
-    for (const [key, val] of Object.entries(updates)) {
-        fields[key] = mapValue(val)
+// Helper to unwrap Firestore JSON to JS Object
+export function unwrap(fields: any): any {
+    const obj: any = {}
+    for (const key in fields) {
+        const val = fields[key]
+        if (val.stringValue !== undefined) obj[key] = val.stringValue
+        else if (val.integerValue !== undefined) obj[key] = parseInt(val.integerValue)
+        else if (val.doubleValue !== undefined) obj[key] = val.doubleValue
+        else if (val.booleanValue !== undefined) obj[key] = val.booleanValue
+        else if (val.timestampValue !== undefined) obj[key] = val.timestampValue
+        else if (val.mapValue !== undefined) obj[key] = unwrap(val.mapValue.fields)
+        else if (val.arrayValue !== undefined) obj[key] = (val.arrayValue.values || []).map((v: any) => {
+            if (v.stringValue !== undefined) return v.stringValue
+            if (v.mapValue !== undefined) return unwrap(v.mapValue.fields)
+            // simplified array handling - add more if needed
+            return v
+        })
+        else if (val.nullValue !== undefined) obj[key] = null
     }
-
-    const updateMask = Object.keys(fields).map(key => `updateMask.fieldPaths=${key}`).join('&')
-    const url = `https://firestore.googleapis.com/v1/projects/${sa.project_id}/databases/(default)/documents/orders/${orderId}?${updateMask}`
-
-    const res = await fetch(url, {
-        method: 'PATCH',
-        headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ name: `projects/${sa.project_id}/databases/(default)/documents/orders/${orderId}`, fields })
-    })
-
-    if (!res.ok) {
-        const err = await res.text()
-        console.error('Firestore Update Error:', err)
-        throw new Error(`Firestore REST Update Error: ${err}`)
-    }
-    return await res.json()
+    return obj
 }
 
-export async function createTransactionOnEdge(data: Record<string, any>) {
+export async function runQueryOnEdge(collection: string, structuredQuery: any) {
     const sa = getServiceAccount()
     if (!sa) throw new Error('Service Account not found')
 
     const token = await getAccessToken(sa)
-    const fields: Record<string, any> = {}
+    // Parent should be projects/{projectId}/databases/(default)/documents
+    const parent = `projects/${sa.project_id}/databases/(default)/documents`
+    const url = `https://firestore.googleapis.com/v1/${parent}:runQuery`
 
-    for (const [key, val] of Object.entries(data)) {
-        fields[key] = mapValue(val)
+    // Provide 'from' clause if not present
+    if (!structuredQuery.from) {
+        structuredQuery.from = [{ collectionId: collection }]
     }
-
-    const url = `https://firestore.googleapis.com/v1/projects/${sa.project_id}/databases/(default)/documents/transactions`
 
     const res = await fetch(url, {
         method: 'POST',
@@ -178,17 +170,37 @@ export async function createTransactionOnEdge(data: Record<string, any>) {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ fields })
+        body: JSON.stringify({ structuredQuery })
     })
 
     if (!res.ok) {
         const err = await res.text()
-        console.error('Firestore Create Error:', err)
-        throw new Error(`Firestore REST Create Error: ${err}`)
+        console.error('Firestore Query Error:', err)
+        throw new Error(`Firestore REST Query Error: ${err}`)
     }
-    return await res.json()
+
+    const data = await res.json()
+    // data is array of objects with 'document' or 'readTime'
+    const results: any[] = []
+    if (Array.isArray(data)) {
+        for (const item of data) {
+            if (item.document) {
+                const id = item.document.name.split('/').pop()
+                const props = item.document.fields ? unwrap(item.document.fields) : {}
+                results.push({ id, ...props })
+            }
+        }
+    }
+    return results
 }
 
+export async function updateOrderOnEdge(orderId: string, updates: Record<string, any>) {
+    return updateDocumentOnEdge('orders', orderId, updates)
+}
+
+export async function createTransactionOnEdge(data: Record<string, any>) {
+    return createDocumentOnEdge('transactions', data)
+}
 
 export async function createDocumentOnEdge(collection: string, data: Record<string, any>) {
     const sa = getServiceAccount()
@@ -277,29 +289,25 @@ export async function getDocument(path: string) {
 
     const data = await res.json()
 
-    // Helper to unwrap Firestore JSON to JS Object
-    const unwrap = (fields: any): any => {
-        const obj: any = {}
-        for (const key in fields) {
-            const val = fields[key]
-            if (val.stringValue !== undefined) obj[key] = val.stringValue
-            else if (val.integerValue !== undefined) obj[key] = parseInt(val.integerValue)
-            else if (val.doubleValue !== undefined) obj[key] = val.doubleValue
-            else if (val.booleanValue !== undefined) obj[key] = val.booleanValue
-            else if (val.timestampValue !== undefined) obj[key] = val.timestampValue
-            else if (val.mapValue !== undefined) obj[key] = unwrap(val.mapValue.fields)
-            else if (val.arrayValue !== undefined) obj[key] = (val.arrayValue.values || []).map((v: any) => {
-                if (v.stringValue !== undefined) return v.stringValue
-                // simplified array handling
-                return v
-            })
-            else if (val.nullValue !== undefined) obj[key] = null
-        }
-        return obj
-    }
-
     if (data.fields) {
         return { id: data.name.split('/').pop(), ...unwrap(data.fields) }
     }
     return null
+}
+
+export async function deleteDocumentOnEdge(collection: string, docId: string) {
+    const sa = getServiceAccount()
+    if (!sa) throw new Error('Service Account not found')
+    const token = await getAccessToken(sa)
+    const url = `https://firestore.googleapis.com/v1/projects/${sa.project_id}/databases/(default)/documents/${collection}/${docId}`
+    const res = await fetch(url, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (!res.ok) {
+        const err = await res.text()
+        console.error(`Firestore Delete Error (${collection}/${docId}):`, err)
+        throw new Error(`Firestore REST Delete Error: ${err}`)
+    }
+    return true
 }

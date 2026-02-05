@@ -1,9 +1,8 @@
-
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getDocument, updateDocumentOnEdge, createDocumentOnEdge } from "@/lib/firestore-edge";
 import { requireAdmin } from "@/lib/auth";
 
-export const dynamic = 'force-dynamic';
+export const runtime = 'edge';
 
 export async function GET() {
     try {
@@ -12,18 +11,15 @@ export async function GET() {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        let settings = await prisma.siteSettings.findUnique({
-            where: { id: "site" }
-        });
+        let settings = await getDocument('site_settings/site');
 
         if (!settings) {
             // Create default settings if not exists
-            settings = await prisma.siteSettings.create({
-                data: {
-                    id: "site",
-                    maintenanceMode: false,
-                    autoSyncEnabled: true
-                }
+            settings = await createDocumentOnEdge('site_settings', {
+                id: 'site',
+                maintenanceMode: false,
+                autoSyncEnabled: true,
+                created_at: new Date().toISOString()
             });
         }
 
@@ -43,17 +39,22 @@ export async function PUT(req: Request) {
 
         const body = await req.json();
 
-        // Remove id from body to prevent overwrite errors (though id is fixed)
+        // Remove id from body to prevent overwrite errors
         const { id, ...data } = body;
 
-        const settings = await prisma.siteSettings.upsert({
-            where: { id: "site" },
-            update: data,
-            create: {
-                id: "site",
-                ...data
-            }
-        });
+        // Check if settings exist
+        const existing = await getDocument('site_settings/site');
+
+        let settings;
+        if (existing) {
+            settings = await updateDocumentOnEdge('site_settings', 'site', data);
+        } else {
+            settings = await createDocumentOnEdge('site_settings', {
+                id: 'site',
+                ...data,
+                created_at: new Date().toISOString()
+            });
+        }
 
         return NextResponse.json(settings);
     } catch (error: any) {

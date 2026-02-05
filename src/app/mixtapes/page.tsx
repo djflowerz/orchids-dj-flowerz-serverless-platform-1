@@ -1,26 +1,35 @@
-import { prisma } from '@/lib/prisma'
+import { runQueryOnEdge } from '@/lib/firestore-edge'
 import { Mixtape } from '@/lib/types'
 import { MixtapesList } from '@/components/mixtapes/MixtapesList'
 
 async function getMixtapes(): Promise<Mixtape[]> {
   try {
-    const mixtapes = await prisma.mixtape.findMany({
-      where: { status: 'active' },
-      orderBy: { createdAt: 'desc' }
-    })
+    const query = {
+      from: [{ collectionId: 'mixtapes' }],
+      where: {
+        fieldFilter: {
+          field: { fieldPath: 'status' },
+          op: 'EQUAL',
+          value: { stringValue: 'active' }
+        }
+      },
+      orderBy: [{ field: { fieldPath: 'created_at' }, direction: 'DESCENDING' }]
+    }
 
-    return mixtapes.map((m: typeof mixtapes[number]) => ({
+    const mixtapes = await runQueryOnEdge('mixtapes', query)
+
+    return mixtapes.map((m: any) => ({
       id: m.id,
       title: m.title,
       description: m.description,
       price: m.price,
-      cover_image: m.coverImage || '',
-      stream_url: m.audioUrl || '',
-      download_url: m.audioDownloadUrl || '',
+      cover_image: m.cover_image || '',
+      stream_url: m.audio_url || '',
+      download_url: m.audio_download_url || '',
       category: m.genre,
-      downloads: m.plays,
+      downloads: m.plays || 0,
       status: m.status,
-      created_at: m.createdAt.toISOString()
+      created_at: m.created_at
     }))
   } catch (error) {
     console.error('Error fetching mixtapes:', error)

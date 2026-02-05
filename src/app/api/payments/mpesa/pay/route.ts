@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { runQueryOnEdge, updateDocumentOnEdge } from '@/lib/firestore-edge';
 import { initiateStkPush } from '@/lib/mpesa';
 import { getCurrentUser } from '@/lib/auth'
+
+export const runtime = 'edge';
 
 export async function POST(req: Request) {
     try {
@@ -20,27 +22,56 @@ export async function POST(req: Request) {
             );
         }
 
-        const booking = await prisma.recordingBooking.findUnique({
-            where: { id: bookingId },
-            include: {
-                session: true,
+        // Find booking
+        const query = {
+            from: [{ collectionId: 'recording_bookings' }],
+            where: {
+                fieldFilter: {
+                    field: { fieldPath: 'id' },
+                    op: 'EQUAL',
+                    value: { stringValue: bookingId }
+                }
             },
-        });
+            limit: 1
+        };
+
+        const bookings = await runQueryOnEdge('recording_bookings', query);
+        const booking = bookings[0] || null;
 
         if (!booking) {
             return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
         }
 
         // Ensure the user owns the booking
-        if (booking.userId !== user.id) {
+        if (booking.user_id !== user.id) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
         }
 
-        if (booking.isPaid) {
+        if (booking.is_paid) {
             return NextResponse.json(
                 { error: 'Booking is already paid' },
                 { status: 400 }
             );
+        }
+
+        // Fetch session details
+        let sessionName = 'Recording Session';
+        if (booking.session_id) {
+            const sessionQuery = {
+                from: [{ collectionId: 'recording_sessions' }],
+                where: {
+                    fieldFilter: {
+                        field: { fieldPath: 'id' },
+                        op: 'EQUAL',
+                        value: { stringValue: booking.session_id }
+                    }
+                },
+                limit: 1
+            };
+            const sessions = await runQueryOnEdge('recording_sessions', sessionQuery);
+            if (sessions[0]) {
+                sessionName = sessions[0].name || sessionName;
+            }
         }
 
         // Construct Callback URL - MUST be https
@@ -50,20 +81,16 @@ export async function POST(req: Request) {
         // Initiate STK Push
         const stkResponse = await initiateStkPush({
             phoneNumber,
-            amount: booking.totalPrice,
-            accountReference: booking.session.name.substring(0, 12), // Max 12 chars
+            amount: booking.total_price,
+            accountReference: sessionName.substring(0, 12), // Max 12 chars
             transactionDesc: `Pay for Booking ${booking.id.substring(0, 8)}`,
             callbackUrl,
         });
 
         // Store CheckoutRequestID in paymentReference temporarily
-        // We will update this to the actual Receipt Number on callback success
-        await prisma.recordingBooking.update({
-            where: { id: bookingId },
-            data: {
-                paymentReference: stkResponse.CheckoutRequestID,
-                paymentMethod: 'MPESA',
-            },
+        await updateDocumentOnEdge('recording_bookings', bookingId, {
+            payment_reference: stkResponse.CheckoutRequestID,
+            payment_method: 'MPESA'
         });
 
         return NextResponse.json({

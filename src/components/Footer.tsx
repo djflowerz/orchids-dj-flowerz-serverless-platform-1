@@ -26,15 +26,16 @@ export function Footer() {
               <Link href="#" aria-label="YouTube" className="p-2 rounded-full bg-white/5 text-white/50 hover:text-white hover:bg-white/10 transition-all">
                 <Youtube size={18} />
               </Link>
-              <a href="mailto:support@djflowerz.com" aria-label="Contact Support" className="p-2 rounded-full bg-white/5 text-white/50 hover:text-white hover:bg-white/10 transition-all">
+              <Link href="/contact" aria-label="Contact Support" className="p-2 rounded-full bg-white/5 text-white/50 hover:text-white hover:bg-white/10 transition-all">
                 <Send size={18} />
-              </a>
+              </Link>
             </div>
           </div>
 
           <div>
             <h4 className="text-white font-semibold mb-4">Quick Links</h4>
             <div className="space-y-2">
+              <Link href="/about" className="block text-white/50 hover:text-white text-sm transition-colors">About DJ Flowerz</Link>
               <Link href="/mixtapes" className="block text-white/50 hover:text-white text-sm transition-colors">Mixtapes</Link>
               <Link href="/store" className="block text-white/50 hover:text-white text-sm transition-colors">Store</Link>
               <Link href="/music-pool" className="block text-white/50 hover:text-white text-sm transition-colors">Music Pool</Link>
@@ -43,11 +44,13 @@ export function Footer() {
           </div>
 
           <div>
-            <h4 className="text-white font-semibold mb-4">Support</h4>
+            <h4 className="text-white font-semibold mb-4">Support & Legal</h4>
             <div className="space-y-2">
               <Link href="/profile" className="block text-white/50 hover:text-white text-sm transition-colors">My Account</Link>
               <Link href="/cart" className="block text-white/50 hover:text-white text-sm transition-colors">Cart</Link>
-              <a href="mailto:support@djflowerz.com" className="block text-white/50 hover:text-white text-sm transition-colors">Contact</a>
+              <Link href="/contact" className="block text-white/50 hover:text-white text-sm transition-colors">Contact Support</Link>
+              <Link href="/referrals" className="block text-white/50 hover:text-white text-sm transition-colors">Referral Program</Link>
+              <Link href="/privacy" className="block text-white/50 hover:text-white text-sm transition-colors">Privacy & Terms</Link>
             </div>
           </div>
         </div>

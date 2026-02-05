@@ -1,5 +1,6 @@
+
 import { NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { updateDocumentOnEdge } from '@/lib/firestore-edge'
 
 export const runtime = 'edge'
 
@@ -40,23 +41,18 @@ export async function POST(req: Request) {
         // Identify the order
         const targetOrderId = orderId || reference
 
-        // Update the order in Prisma
+        // Update the order in Firestore
         try {
-            const updatedOrder = await prisma.order.update({
-                where: { id: targetOrderId },
-                data: {
-                    status: 'PROCESSING', // or SHIPPED/DELIVERED based on flow
-                    isPaid: true,
-                    paymentMethod: 'PAYSTACK'
-                }
+            const updatedOrder = await updateDocumentOnEdge('orders', targetOrderId, {
+                status: 'PROCESSING',
+                isPaid: true,
+                paymentMethod: 'PAYSTACK'
             })
 
             console.log(`Order ${targetOrderId} verified and updated`, updatedOrder)
             return NextResponse.json({ verified: true, data: data.data })
         } catch (error) {
-            console.error('Error updating order status in Prisma:', error)
-            // Even if DB update fails, payment was verified. But user might not get their goods.
-            // We should return error so client can retry or contact support.
+            console.error('Error updating order status in Firestore:', error)
             return NextResponse.json({ error: 'Payment verified but failed to update order status' }, { status: 500 })
         }
 

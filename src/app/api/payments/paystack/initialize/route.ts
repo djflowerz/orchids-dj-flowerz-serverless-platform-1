@@ -1,67 +1,97 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { requireAuth } from '@/lib/auth';
+import { runQueryOnEdge, updateDocumentOnEdge } from '@/lib/firestore-edge';
+import { getCurrentUser } from '@/lib/auth';
 
 export const runtime = 'edge';
 
 export async function POST(request: NextRequest) {
     try {
-        const user = await requireAuth();
+        const user = await getCurrentUser();
+
+        if (!user) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         const { bookingId, email } = await request.json();
 
         if (!bookingId) {
             return NextResponse.json({ error: 'Missing bookingId' }, { status: 400 });
         }
 
-        const booking = await prisma.recordingBooking.findUnique({
-            where: { id: bookingId },
-            include: { session: true }
-        });
+        // Find booking
+        const query = {
+            from: [{ collectionId: 'recording_bookings' }],
+            where: {
+                fieldFilter: {
+                    field: { fieldPath: 'id' },
+                    op: 'EQUAL',
+                    value: { stringValue: bookingId }
+                }
+            },
+            limit: 1
+        };
+
+        const bookings = await runQueryOnEdge('recording_bookings', query);
+        const booking = bookings[0] || null;
 
         if (!booking) {
             return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
         }
 
-        if (booking.userId !== user.id) {
+        if (booking.user_id !== user.id) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
         }
 
-        if (booking.isPaid) {
+        if (booking.is_paid) {
             return NextResponse.json({ error: 'Booking is already paid' }, { status: 400 });
+        }
+
+        let sessionName = 'Recording Session';
+        if (booking.session_id) {
+            const sessionQuery = {
+                from: [{ collectionId: 'recording_sessions' }],
+                where: {
+                    fieldFilter: {
+                        field: { fieldPath: 'id' },
+                        op: 'EQUAL',
+                        value: { stringValue: booking.session_id }
+                    }
+                },
+                limit: 1
+            };
+            const sessions = await runQueryOnEdge('recording_sessions', sessionQuery);
+            if (sessions[0]) {
+                sessionName = sessions[0].name || sessionName;
+            }
         }
 
         // Paystack Initialization
         const secretKey = process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK;
         if (!secretKey) throw new Error("Paystack Secret Key missing");
 
-        // Amount is in KES. Paystack expects KES amounts in kobo/cents (x100) if currency is NGN/GHS/ZAR, 
-        // BUT for KES, Paystack documentation says: "Amount should be in the subunit of the supported currency".
-        // 1 KES = 100 cents. So yes, multiply by 100.
-        const amountInCents = Math.round(booking.totalPrice * 100);
+        // Amount is in KES. Paystack expects KES amounts in kobo/cents (x100)
+        const amountInCents = Math.round(booking.total_price * 100);
 
-        // Callback URL: We want to perform verification or show success.
-        // If user has a set callback URL, we can use that, or override.
-        // Let's redirect back to the user's bookings page with a success flag, 
-        // OR a verification intermediate page.
         const origin = process.env.NEXT_PUBLIC_BASE_URL || 'https://djflowerz-site.pages.dev';
         const callbackUrl = `${origin}/payment-success?bookingId=${booking.id}`;
-        // Or utilize the provided live callback if strictly enforced, but usually override works.
+
+        const userEmail = user.emailAddresses?.[0]?.emailAddress;
 
         const paystackBody = {
-            email: email || user.email,
+            email: email || userEmail,
             amount: amountInCents,
             currency: "KES",
             callback_url: callbackUrl,
-            repo: "dj-flowerz-web", // custom field mainly for internal tracking
+            repo: "dj-flowerz-web",
             metadata: {
                 booking_id: booking.id,
                 user_id: user.id,
-                type: 'booking', // Key for webhook to identify
+                type: 'booking',
                 custom_fields: [
                     {
                         display_name: "Session Name",
                         variable_name: "session_name",
-                        value: booking.session.name
+                        value: sessionName
                     }
                 ]
             }
@@ -83,12 +113,9 @@ export async function POST(request: NextRequest) {
         }
 
         // Save reference
-        await prisma.recordingBooking.update({
-            where: { id: booking.id },
-            data: {
-                paymentReference: data.data.reference,
-                paymentMethod: 'PAYSTACK'
-            }
+        await updateDocumentOnEdge('recording_bookings', bookingId, {
+            payment_reference: data.data.reference,
+            payment_method: 'PAYSTACK'
         });
 
         return NextResponse.json({
