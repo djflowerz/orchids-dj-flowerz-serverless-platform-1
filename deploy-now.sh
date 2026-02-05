@@ -29,6 +29,7 @@ echo ""
 
 # Build the project
 echo "🔨 Building project..."
+export DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
 echo "Running: npm run pages:build"
 echo ""
 npm run pages:build
