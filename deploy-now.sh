@@ -58,7 +58,7 @@ echo "🚀 Deploying to Cloudflare Pages..."
 echo "Project: djflowerz-site"
 echo ""
 
-wrangler pages deploy .vercel/output/static --project-name=djflowerz-site
+wrangler pages deploy .vercel/output/static --project-name=djflowerz
 
 if [ $? -eq 0 ]; then
     echo ""
@@ -67,7 +67,7 @@ if [ $? -eq 0 ]; then
     echo "======================================================"
     echo ""
     echo "Your site should be live at:"
-    echo "🔗 https://djflowerz-site.pages.dev"
+    echo "🔗 https://djflowerz.pages.dev"
     echo ""
     echo "⏰ Wait 1-2 minutes for changes to propagate"
     echo ""

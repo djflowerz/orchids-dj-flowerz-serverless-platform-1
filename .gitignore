@@ -58,3 +58,9 @@ backend-functions/.env
 build.log
 service-account.json.bak
 set-env-vars.sh
+
+# Private Config Documentation
+CLOUDFLARE_PAGES_CONFIG.md
+deploy.log
+deploy-with-real-keys.log
+testsprite_tests/

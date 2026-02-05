@@ -1,6 +1,6 @@
 
 import { NextResponse } from "next/server";
-import { generateSignedUpload } from "@/lib/r2";
+import { generateStorageSignedUpload } from "@/lib/storage-edge";
 import { requireAdmin } from "@/lib/auth";
 
 export const runtime = 'edge';
@@ -22,28 +22,14 @@ export async function POST(req: Request) {
         const cleanName = filename.replace(/[^a-zA-Z0-9.-]/g, '-');
         const key = `${folder}/${Date.now()}-${cleanName}`;
 
-        // Generate signed URL
-        const signedUrl = await generateSignedUpload(key, contentType);
+        // Generate signed Upload URL (GCS V4)
+        const signedUrl = await generateStorageSignedUpload(key, contentType);
 
-        // Public URL logic - assuming standard R2 public access or custom domain
-        // If you have a custom domain for R2: https://cdn.djflowerz.com/${key}
-        // Or Cloudflare R2dev URL. 
-        // Usually, R2_ENDPOINT is the S3 endpoint, not public.
-        // Let's assume a public base URL convention. 
-        // If not set, return the key and let frontend construct it or use a default.
-        // Based on previous code, they were storing full URLs.
-
-        // Check if R2_PUBLIC_URL is in env (it wasn't listed explicitly but R2_ENDPOINT was).
-        // Let's assume a pattern similar to: https://pub-[id].r2.dev or custom.
-        // I'll check env vars later. For now, I'll return the key and let the caller construct, 
-        // OR try to construct it if I know the domain.
-        // I'll use a placeholder for now which I can update.
-        // Actually, looking at src/lib/r2.ts, it doesn't show public URL generation.
-        // However, image delivery usually goes through a public domain.
-
-        const publicUrl = process.env.R2_PUBLIC_URL
-            ? `${process.env.R2_PUBLIC_URL}/${key}`
-            : `https://cdn.djflowerz.com/${key}`; // Fallback to assumed domain
+        // Public URL for GCS (Note: This might be private, but the key allows generating a download link later)
+        // If the bucket is public, it serves here. If private, we rely on signed download URLs.
+        // We'll return the GCS direct link for reference.
+        const bucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
+        const publicUrl = `https://storage.googleapis.com/${bucket}/${key}`;
 
         return NextResponse.json({ signedUrl, publicUrl, key });
     } catch (error: any) {

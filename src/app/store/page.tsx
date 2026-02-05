@@ -2,21 +2,46 @@ import { Product } from '@/lib/types'
 import { ProductsList } from '@/components/store/ProductsList'
 import { TechDealsGrid } from '@/components/store/TechDealsGrid'
 
+import { runQueryOnEdge } from '@/lib/firestore-edge'
+
 async function getProducts(): Promise<Product[]> {
   try {
-    // Fetch from our new API instead of Firebase
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
-    const res = await fetch(`${baseUrl}/api/products`, {
-      next: { revalidate: 60 } // Revalidate every 60 seconds
-    })
-
-    if (!res.ok) {
-      console.error('Failed to fetch products:', res.statusText)
-      return []
+    const structuredQuery = {
+      from: [{ collectionId: 'products' }],
+      limit: 50,
+      orderBy: [{ field: { fieldPath: 'createdAt' }, direction: 'DESCENDING' }]
     }
 
-    const products = await res.json()
-    return products
+    const rawProducts = await runQueryOnEdge('products', structuredQuery)
+
+    return rawProducts.map((p: any) => {
+      // Handle Denormalized store or fallback
+      const store = p.store || { name: 'DJ Flowerz', username: 'djflowerz' }
+
+      // Calculate fields
+      const stockCount = typeof p.inStock === 'number' ? p.inStock : 100
+      const ratings = p.ratings || []
+      const avgRating = ratings.length ? ratings.reduce((a: number, b: any) => a + b.rating, 0) / ratings.length : 0
+
+      return {
+        id: p.id,
+        title: p.name || p.title || 'Untitled',
+        description: p.description || '',
+        price: Number(p.price) || 0,
+        category: p.category || 'Uncategorized',
+        cover_images: Array.isArray(p.images) ? p.images : [],
+        image_url: Array.isArray(p.images) ? p.images[0] : null,
+        is_trending: !!p.isTrending,
+        is_free: p.price === 0,
+        in_stock: stockCount > 0,
+        created_at: p.createdAt || new Date().toISOString(),
+        store: store,
+        average_rating: avgRating,
+        review_count: ratings.length,
+        popularity_score: stockCount
+      } as Product
+    })
+
   } catch (error) {
     console.error('Error fetching products:', error)
     return []
