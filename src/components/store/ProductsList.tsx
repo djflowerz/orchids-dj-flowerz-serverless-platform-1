@@ -12,9 +12,10 @@ import { formatCurrency } from '@/lib/utils'
 const categories = ['All', 'Laptops', 'Desktops', 'Components', 'Accessories', 'Software', 'Samples', 'Apparel']
 const types = ['all', 'digital', 'physical']
 const osFilters = ['All', 'macOS', 'Windows', 'Android']
-const priceFilters = ['All', 'Free', 'Paid']
-const ratingFilters = ['All', '4+ Stars', '3+ Stars']
-const sortOptions = ['Newest', 'Hot', 'Price: Low', 'Price: High', 'Rating']
+const priceFilters = ['All', 'Free', 'Paid', 'Under 5000', '5000-10000', '10000-50000', '50000+']
+const ratingFilters = ['All', '5 Stars', '4+ Stars', '3+ Stars', '2+ Stars']
+const sortOptions = ['Newest', 'Hot', 'Price: Low', 'Price: High', 'Rating', 'Most Popular']
+const stockFilters = ['All', 'In Stock', 'Low Stock', 'Out of Stock']
 
 interface ProductWithRating extends Product {
   average_rating: number
@@ -29,6 +30,7 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
   const [osFilter, setOsFilter] = useState('All')
   const [priceFilter, setPriceFilter] = useState('All')
   const [ratingFilter, setRatingFilter] = useState('All')
+  const [stockFilter, setStockFilter] = useState('All')
   const [sortBy, setSortBy] = useState('Newest')
   const [products, setProducts] = useState<ProductWithRating[]>([])
 
@@ -56,18 +58,62 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
   }, [])
 
   const filteredProducts = products.filter(p => {
-    const matchesSearch = p.title.toLowerCase().includes(search.toLowerCase())
+    const matchesSearch = p.title.toLowerCase().includes(search.toLowerCase()) || 
+                         (p.description && p.description.toLowerCase().includes(search.toLowerCase()))
     const matchesCategory = category === 'All' || p.category === category
     const pType = p.product_type || (p as any).type || 'digital'
     const matchesType = productType === 'all' || pType === productType
     const matchesOs = osFilter === 'All' || (p.supported_os && p.supported_os.includes(osFilter))
-    const matchesPrice = priceFilter === 'All' ||
-      (priceFilter === 'Free' && (p.is_free || !p.is_paid)) ||
-      (priceFilter === 'Paid' && p.is_paid && !p.is_free)
-    const matchesRating = ratingFilter === 'All' ||
-      (ratingFilter === '4+ Stars' && p.average_rating >= 4) ||
-      (ratingFilter === '3+ Stars' && p.average_rating >= 3)
-    return matchesSearch && matchesCategory && matchesType && matchesOs && matchesPrice && matchesRating
+    
+    // Enhanced price filtering with ranges
+    let matchesPrice = false
+    if (priceFilter === 'All') {
+      matchesPrice = true
+    } else if (priceFilter === 'Free') {
+      matchesPrice = p.is_free || Number(p.price) === 0
+    } else if (priceFilter === 'Paid') {
+      matchesPrice = p.is_paid && Number(p.price) > 0
+    } else if (priceFilter === 'Under 5000') {
+      matchesPrice = Number(p.price) > 0 && Number(p.price) < 5000
+    } else if (priceFilter === '5000-10000') {
+      matchesPrice = Number(p.price) >= 5000 && Number(p.price) <= 10000
+    } else if (priceFilter === '10000-50000') {
+      matchesPrice = Number(p.price) > 10000 && Number(p.price) <= 50000
+    } else if (priceFilter === '50000+') {
+      matchesPrice = Number(p.price) > 50000
+    }
+    
+    // Enhanced rating filtering
+    let matchesRating = false
+    if (ratingFilter === 'All') {
+      matchesRating = true
+    } else if (ratingFilter === '5 Stars') {
+      matchesRating = p.average_rating === 5
+    } else if (ratingFilter === '4+ Stars') {
+      matchesRating = p.average_rating >= 4
+    } else if (ratingFilter === '3+ Stars') {
+      matchesRating = p.average_rating >= 3
+    } else if (ratingFilter === '2+ Stars') {
+      matchesRating = p.average_rating >= 2
+    }
+    
+    // Stock availability filter
+    let matchesStock = true
+    const stock = p.stock_quantity !== undefined ? p.stock_quantity : (p as any).stock
+    if (pType === 'physical') {
+      if (stockFilter === 'In Stock') {
+        matchesStock = (stock || 0) > 5
+      } else if (stockFilter === 'Low Stock') {
+        matchesStock = (stock || 0) > 0 && (stock || 0) <= 5
+      } else if (stockFilter === 'Out of Stock') {
+        matchesStock = (stock || 0) === 0
+      }
+    } else {
+      // Digital products are always in stock
+      matchesStock = stockFilter !== 'Out of Stock'
+    }
+    
+    return matchesSearch && matchesCategory && matchesType && matchesOs && matchesPrice && matchesRating && matchesStock
   }).sort((a, b) => {
     switch (sortBy) {
       case 'Hot':
@@ -194,6 +240,52 @@ export function ProductsList({ initialProducts }: { initialProducts: Product[] }
                 className="hidden"
                 checked={osFilter === os}
                 onChange={() => setOsFilter(os)}
+              />
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Rating */}
+      <div>
+        <h3 className="font-bold text-white mb-4">Rating</h3>
+        <div className="space-y-2">
+          {ratingFilters.map((r) => (
+            <label key={r} className="flex items-center gap-3 cursor-pointer group">
+              <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${ratingFilter === r ? 'border-yellow-400' : 'border-white/20 group-hover:border-white/40'
+                }`}>
+                {ratingFilter === r && <div className="w-2 h-2 rounded-full bg-yellow-400" />}
+              </div>
+              <span className={`text-sm ${ratingFilter === r ? 'text-white' : 'text-white/60 group-hover:text-white/80'}`}>{r}</span>
+              <input
+                type="radio"
+                name="rating"
+                className="hidden"
+                checked={ratingFilter === r}
+                onChange={() => setRatingFilter(r)}
+              />
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Stock Availability */}
+      <div>
+        <h3 className="font-bold text-white mb-4">Availability</h3>
+        <div className="space-y-2">
+          {stockFilters.map((s) => (
+            <label key={s} className="flex items-center gap-3 cursor-pointer group">
+              <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${stockFilter === s ? 'border-green-400' : 'border-white/20 group-hover:border-white/40'
+                }`}>
+                {stockFilter === s && <div className="w-2 h-2 rounded-full bg-green-400" />}
+              </div>
+              <span className={`text-sm ${stockFilter === s ? 'text-white' : 'text-white/60 group-hover:text-white/80'}`}>{s}</span>
+              <input
+                type="radio"
+                name="stock"
+                className="hidden"
+                checked={stockFilter === s}
+                onChange={() => setStockFilter(s)}
               />
             </label>
           ))}

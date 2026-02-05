@@ -165,3 +165,48 @@ export interface Payment {
   paystack_reference: string | null
   created_at: string
 }
+
+export interface ProductBundle {
+  id: string
+  name: string
+  description: string | null
+  bundle_type: 'deal' | 'combo' | 'starter'
+  status: 'active' | 'inactive' | 'featured'
+  products: BundleProduct[]
+  cover_image: string | null
+  regular_price: number // Sum of all product prices
+  bundle_price: number // Discounted bundle price
+  discount_percentage: number
+  max_quantity: number | null
+  created_at: string
+  updated_at: string
+}
+
+export interface BundleProduct {
+  product_id: string
+  quantity: number
+  price_at_bundle: number
+}
+
+export interface BundleCart {
+  bundle_id: string
+  quantity: number
+  products: BundleProduct[]
+}
+
+export interface Coupon {
+  id: string
+  code: string
+  description: string | null
+  discount_type: 'percentage' | 'fixed'
+  discount_value: number
+  min_purchase: number | null
+  max_uses: number | null
+  usage_count: number
+  valid_from: string
+  valid_until: string
+  status: 'active' | 'expired' | 'inactive'
+  applicable_to: 'all' | 'products' | 'bundles' | string[]
+  created_at: string
+  updated_at: string
+}
